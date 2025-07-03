@@ -1,156 +1,161 @@
 package com.yuce.task;
 
 import com.alibaba.fastjson.JSONObject;
-import com.yuce.config.VideoProperties;
-import com.yuce.entity.*;
+import com.yuce.algorithm.*;
+import com.yuce.entity.OriginalAlarmRecord;
+import com.yuce.handler.MessageHandler;
 import com.yuce.service.impl.*;
-import com.yuce.util.KafkaUtil;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.kafka.clients.consumer.*;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
-import javax.annotation.PostConstruct;
-import java.io.File;
+import java.time.format.DateTimeFormatter;
 
 /**
- * @ClassName EventFetchTask
- * @Description 事件捕获任务
- * @Author jacksparrow
- * @Email 18310124408@163.com
- * @Date 2025/5/14 19:01
- * @Version 1.0
+ * 多消费者并行处理事件捕获任务
+ * 支持按配置数量启动消费者，每个消费者独立处理消息并管理偏移量
  */
 @Slf4j
 @Component
-public class EventFetchTask {
+public class EventFetchTask implements MessageHandler {
 
     @Autowired
     private OriginalAlarmServiceImpl originalAlarmServiceImpl;
 
     @Autowired
-    private PswAlgorithmServiceImpl pswAlgorithmServiceImpl;
+    private PswAlgorithm pswAlgorithm;
 
     @Autowired
-    private GeneralAlgorithmServiceImpl generalAlgorithmServiceImpl;
+    private GeneralAlgorithm generalAlgorithm;
 
     @Autowired
-    private PersonAlgorithmServiceImpl personAlgorithmServiceImpl;
+    private PersonAlgorithm personAlgorithm;
 
     @Autowired
-    private VehicleAlgorithmServiceImpl vehicleAlgorithmServiceImpl;
+    private VehicleAlgorithm vehicleAlgorithm;
 
     @Autowired
-    private VideoDealServiceImpl videoDealServiceImpl;
+    private ExtractFrameAlgorithm extractFrameAlgorithm;
 
     @Autowired
-    private ExtractWindowServiceImpl extractWindowServiceImpl;
+    private ExtractWindowAlgorithm extractWindowAlgorithm;
 
     @Autowired
     private CheckAlarmResultServiceImpl checkAlarmResultServiceImpl;
 
     @Autowired
-    private FeatureElementServiceImpl featureElementServiceImpl;
+    private FeatureElementAlgorithm featureElementAlgorithm;
 
     @Autowired
-    private CollectionServiceImpl collectionServiceImpl;
+    private AlarmCollectionAlgorithm alarmCollectionAlgorithm;
 
     @Autowired
-    private VideoProperties videoProperties;
+    private ExtractImageAlgorithm extractImageAlgorithm;
 
     @Autowired
-    private KafkaUtil kafkaUtil;
+    private CollectionGroupAlgorithm collectionGroupAlgorithm;
 
-    //输出抽帧图片存放文件目录
-    private String outputDir;
 
-    //启动调用一次
-    @PostConstruct
-    public void init() {
-        outputDir = videoProperties.getOutputDir();
-        log.info("项目启动中...");
-        dirInit(outputDir);
-        log.info("项目初始化完成");
-        new Thread(this::coreDeal).start(); // 后台线程持续消费
-    }
 
-    /**
-     * @desc 核心处理逻辑
-     */
-    public void coreDeal() {
+    // 业务核心处理方法，只负责业务逻辑
+    public void handleMessage(ConsumerRecord<String, String> record) {
+        //topic value字段包含特殊字符，非标准json，需要进行格式化处理再映射为OriginalAlarmRecord
+        OriginalAlarmRecord alarmRecord = JSONObject.parseObject((record.value().replaceAll("^\"|\"$", "").replace("\\", "")),OriginalAlarmRecord.class);
 
-        KafkaConsumer consumer = kafkaUtil.getConsumer();//获取kafka消费者
+        String eventType = alarmRecord.getEventType();//告警类型
+        String alarmId = alarmRecord.getId();//告警id
+        String roadId = alarmRecord.getRoadId();//告警所属道路id
+        String imagePath = alarmRecord.getImagePath();//告警记录对应图片地址
+        String videoPath = alarmRecord.getVideoPath();//告警记录对应视频地址
+        log.info("接受原始告警记录:roadId->{},alarmId->{},eventType->{},imagePath->{},videoPath->{},offset->{}",roadId, alarmId, eventType, imagePath, videoPath,record.offset());
 
-        while(true){
-            ConsumerRecords<String, String> records = consumer.poll(5000);//循环拉取处理数据
-            for (ConsumerRecord<String, String> record : records) {
-                String kafkaRecord = record.value().replaceAll("^\"|\"$", "").replace("\\", "");//kafka数据json结构化
-                OriginalAlarmRecord alarmRecord = JSONObject.parseObject(kafkaRecord, OriginalAlarmRecord.class);//转换为原始告警记录对象
-                String eventType = alarmRecord.getEventType();
-                String alarmId = alarmRecord.getId();
-                String roadId = alarmRecord.getRoadId();
-                /**
-                 * 事件类型筛选：
-                 *  --仅获取33141和33112道路数据
-                 *  --仅获取停驶、行人、抛洒物类型
-                 *  --其他类型丢弃
-                 */
-                if (("33141".equals(roadId) || "33112".equals(roadId)) && ("停驶".equals(eventType) || "行人".equals(eventType) || "抛洒物".equals(eventType))){
-                    log.info("分区:{},偏移量:{}，告警记录id:{},告警记录类型:{},告警时间:{}",record.partition(),record.offset(),alarmId,eventType,alarmRecord.getAlarmTime());
-                    if(originalAlarmServiceImpl.getRecordByAlarmIdAndTag(alarmId)){
-                        originalAlarmServiceImpl.saveOrUpdate(alarmRecord);//告警信息已经接受且算法处理完成
-                    }else{
-                        //校验视频格式以及抽帧处理
-                        originalAlarmServiceImpl.save(alarmRecord);//存储数据
-                        if(videoDealServiceImpl.processVideo(alarmRecord) && extractWindowServiceImpl.extractDeal(alarmRecord)) {
-                            if ("抛洒物".equals(eventType)) {
-                                if(!pswAlgorithmServiceImpl.pswDeal(alarmRecord)){
-                                    log.error("抛洒物算法处理异常:alarmId{}",alarmId);
-                                    generalAlgorithmServiceImpl.checkDeal(alarmId);
-                                }
-                            } else if("行人".equals(eventType)) {
-                                if(!personAlgorithmServiceImpl.personDeal(alarmRecord)){
-                                    log.error("行人算法处理异常:alarmId{}",alarmId);
-                                    generalAlgorithmServiceImpl.checkDeal(alarmId);
-                                }else{
-                                    checkAlarmResultServiceImpl.checkResultByImgNum(alarmId, "person");//更新算法结果:只要有一张图片核检成功即认为为正检；
-                                    featureElementServiceImpl.featureElementDeal(alarmId);//更新关联要素
-                                    collectionServiceImpl.collectionDeal(alarmId);//更新告警集
-                                }
-                            } else if("停驶".equals(eventType)) {
-                                if(!vehicleAlgorithmServiceImpl.vehicleDeal(alarmRecord)){
-                                    log.error("停驶算法处理异常:alarmId{}",alarmId);
-                                    generalAlgorithmServiceImpl.checkDeal(alarmId);
-                                }else{
-                                    checkAlarmResultServiceImpl.checkResultByIou(alarmId, 0.2, 1);//更新算法结果:只要有2张图片核检成功即认为为正检；
-                                    featureElementServiceImpl.featureElementDeal(alarmId);//更新关联要素
-                                    collectionServiceImpl.collectionDeal(alarmId);//更新告警集
-                                }
-                            } else{
-                                generalAlgorithmServiceImpl.checkDeal(alarmId);
-                            }
-                        }else {
-                            log.error("视频格式或抽框服务异常:alarmId{}",alarmId);
-                            generalAlgorithmServiceImpl.checkDeal(alarmId);
-                        }
-                    }
-                    alarmRecord.setConsumeTag(1);
-                    originalAlarmServiceImpl.saveOrUpdate(alarmRecord);//算法处理完成变更状态
-                }
-                kafkaUtil.updateOffset(record);//更新kafka偏移量
-            }
+        //筛选目标道路：G33141、G33112
+        if(!("33141".equals(roadId) || "33112".equals(roadId))){
+            log.info("路段范围校验失败:roadId->{},alarmId->{},imagePath->{},videoPath->{}",roadId, alarmId, imagePath, videoPath);
+            return;
         }
-    }
 
-    /**
-     * @desc 初始化抽帧图片存储目录
-     * @param dirPath
-     */
-    public void dirInit(String dirPath) {
-        File dir = new File(dirPath);
-        if (!dir.exists()) {
-            if (!dir.mkdirs()) {
-                throw new RuntimeException("创建输出目录失败: " + outputDir);
-            }
+        //筛选告警类型：停驶、行人、抛洒物
+        if(!("停驶".equals(eventType) || "行人".equals(eventType) || "抛洒物".equals(eventType))){
+            log.info("告警类型校验失败:roadId->{},alarmId->{},eventType->{},imagePath->{},videoPath->{}",roadId, alarmId, eventType, imagePath, videoPath);
+            return;
         }
+
+//        String alarmDate = alarmRecord.getAlarmTime().format(DateTimeFormatter.ofPattern("yyyyMMdd"));
+//        if (alarmDate.compareTo("20250725") < 0 || alarmDate.compareTo("20250725") > 0) {
+//            log.info("告警时间监控失败:roadId->{},alarmId->{},eventType->{},imagePath->{},videoPath->{}", roadId, alarmId, eventType, imagePath, videoPath);
+//            return;
+//        }
+
+        //筛选异常记录
+        if(null == imagePath || imagePath.equals("") || null == videoPath || videoPath.equals("") || null == eventType || eventType.equals("")){
+            log.info("字段筛选失败:roadId->{},alarmId->{},eventType->{},imagePath->{},videoPath->{}",roadId, alarmId, eventType, imagePath, videoPath);
+            return;
+        }
+
+        //告警记录存储逻辑：已接受过数据不再处理，仅做原始记录更新
+        if (originalAlarmServiceImpl.existsByKey(alarmId, imagePath, videoPath)) {
+            log.info("告警已检测:roadId->{},alarmId->{},eventType->{},imagePath->{},videoPath->{}", roadId, alarmId, eventType, imagePath, videoPath);
+            originalAlarmServiceImpl.updateByKey(alarmRecord);
+            return;
+        }else{
+            originalAlarmServiceImpl.insert(alarmRecord);
+            log.info("新增告警记录:roadId->{},alarmId->{},eventType->{},imagePath->{},videoPath->{}", roadId, alarmId, eventType, imagePath, videoPath);
+        }
+
+        //视频抽帧服务
+        if(!extractFrameAlgorithm.extractImage(alarmRecord)) {
+            log.info("告警记录抽帧失败:roadId->{},alarmId->{},eventType->{},imagePath->{},videoPath->{}", roadId, alarmId, eventType, imagePath, videoPath);
+            generalAlgorithm.checkDeal(alarmRecord,"视频抽帧失败");//调用通用算法处理
+            return;
+        }
+
+        //图片提框服务
+        if(!extractWindowAlgorithm.extractWindow(alarmRecord)) {
+            log.info("告警记录提框失败:roadId->{},alarmId->{},eventType->{},imagePath->{},videoPath->{}", roadId, alarmId, eventType, imagePath, videoPath);
+            generalAlgorithm.checkDeal(alarmRecord, "图片提框失败");//调用通用算法处理
+            return;
+        }
+
+        if("抛洒物".equals(eventType)) {
+            if (!pswAlgorithm.pswDeal(alarmRecord)) {
+                log.info("抛洒物处理失败，调用通用算法处理:roadId->{},alarmId->{},eventType->{},imagePath->{},videoPath->{}", roadId, alarmId, eventType, imagePath, videoPath);
+                generalAlgorithm.checkDeal(alarmRecord, "抛洒物算法处理失败");
+            } else {
+                log.info("抛洒物处理成功:roadId->{},alarmId->{},eventType->{},imagePath->{},videoPath->{}", roadId, alarmId, eventType, imagePath, videoPath);
+            }
+            return;
+        }
+
+        if ("行人".equals(eventType)) {
+            if (!personAlgorithm.personDeal(alarmRecord)) {
+                log.info("行人处理失败，调用通用算法处理:roadId->{},alarmId->{},eventType->{},imagePath->{},videoPath->{}", roadId, alarmId, eventType, imagePath, videoPath);
+                generalAlgorithm.checkDeal(alarmRecord, "行人算法处理失败");
+            } else {
+                log.info("行人处理成功:roadId->{},alarmId->{},eventType->{},imagePath->{},videoPath->{}", roadId, alarmId, eventType, imagePath, videoPath);
+                checkAlarmResultServiceImpl.checkResultByImgNum(alarmRecord, "person");
+                extractImageAlgorithm.extractImage(alarmRecord);//抠图
+                featureElementAlgorithm.featureElementDealByAlgo(alarmRecord);//特征要素判定
+                alarmCollectionAlgorithm.collectionDeal(alarmRecord);//告警集判定
+                collectionGroupAlgorithm.groupDeal(alarmRecord);//告警组判定
+            }
+            return;
+        }
+
+        if ("停驶".equals(eventType)) {
+            if (!vehicleAlgorithm.vehicleDeal(alarmRecord)) {
+                log.info("停驶处理失败，调用通用算法处理:roadId->{},alarmId->{},eventType->{},imagePath->{},videoPath->{}", roadId, alarmId, eventType, imagePath, videoPath);
+                generalAlgorithm.checkDeal(alarmRecord,"停驶算法处理失败");
+            } else {
+                log.info("停驶处理成功:roadId->{},alarmId->{},eventType->{},imagePath->{},videoPath->{}", roadId, alarmId, eventType, imagePath, videoPath);
+                checkAlarmResultServiceImpl.checkResultByIou(alarmRecord, 0.2, 1);
+                extractImageAlgorithm.extractImage(alarmRecord);//抠图
+                featureElementAlgorithm.featureElementDealByAlgo(alarmRecord);//特征要素判定
+                alarmCollectionAlgorithm.collectionDeal(alarmRecord);//告警集判定
+                collectionGroupAlgorithm.groupDeal(alarmRecord);//告警组判定
+            }
+            return;
+        }
+        log.info("other exception，请检查告警记录:roadId->{},alarmId->{},eventType->{},imagePath->{},videoPath->{}", roadId, alarmId, eventType, imagePath, videoPath);
     }
 }

@@ -2,6 +2,7 @@ package com.yuce.entity;
 
 import com.baomidou.mybatisplus.annotation.FieldFill;
 import com.baomidou.mybatisplus.annotation.TableField;
+import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 import java.time.LocalDateTime;
 
@@ -15,11 +16,16 @@ import java.time.LocalDateTime;
  */
 
 @Data
+@TableName("feature_element_record")
 public class FeatureElementRecord {
 
     private Long id; // 主键ID
 
     private String alarmId; // 告警ID，关联外部告警表
+
+    private String imagePath; // 告警ID，关联外部告警表
+
+    private String videoPath; // 告警ID，关联外部告警表
 
     private String abnormalLocation; // 异常位置，例如：第1车道、应急车道、硬路肩、道路外
 
@@ -40,6 +46,12 @@ public class FeatureElementRecord {
     private String dangerElement; // 危险要素，例如：冒烟、起火、无
 
     private int disposalAdvice; // 处置建议，例如：尽快确认、无需处理、疑似误报、无法判断
+
+    private String adviceReason; // 处置建议依据
+
+    private String alarmElement; // 告警物体
+
+    private String alarmElementRange; // 告警物附近物体
 
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createTime;

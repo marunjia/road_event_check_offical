@@ -13,5 +13,5 @@ import org.bytedeco.javacv.Frame;
  */
 public interface VideoDealService {
 
-    public boolean processVideo(OriginalAlarmRecord originalAlarmRecord);
+    public boolean extractImage(OriginalAlarmRecord originalAlarmRecord);
 }

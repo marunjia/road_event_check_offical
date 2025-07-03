@@ -44,6 +44,7 @@
         <javacv.ffmpeg.version>5.1.2-1.5.8</javacv.ffmpeg.version>
         <javacv.openblas.version>0.3.21-1.5.8</javacv.openblas.version>
         <javacpp.platform>linux-x86_64</javacpp.platform>
+
     </properties>
 
     <dependencies>
@@ -62,6 +63,11 @@
             <groupId>com.mysql</groupId>
             <artifactId>mysql-connector-j</artifactId>
             <scope>runtime</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-validation</artifactId>
         </dependency>
 
         <!-- Tomcat -->
@@ -94,34 +100,42 @@
         </dependency>
 
         <!-- JavaCV -->
+        <!-- JavaCV 核心 -->
         <dependency>
             <groupId>org.bytedeco</groupId>
             <artifactId>javacv</artifactId>
             <version>${javacv.version}</version>
         </dependency>
+
+        <!-- JavaCPP 引擎，支持 native 加载 -->
         <dependency>
             <groupId>org.bytedeco</groupId>
             <artifactId>javacpp</artifactId>
             <version>${javacv.version}</version>
-            <classifier>${javacpp.platform}</classifier>
         </dependency>
+
+        <!-- FFmpeg（仅打包 Linux x86_64） -->
         <dependency>
             <groupId>org.bytedeco</groupId>
             <artifactId>ffmpeg</artifactId>
             <version>${javacv.ffmpeg.version}</version>
-            <classifier>${javacpp.platform}</classifier>
+            <classifier>linux-x86_64</classifier>
         </dependency>
+
+        <!-- OpenCV -->
         <dependency>
             <groupId>org.bytedeco</groupId>
             <artifactId>opencv</artifactId>
             <version>${javacv.opencv.version}</version>
-            <classifier>${javacpp.platform}</classifier>
+            <classifier>linux-x86_64</classifier>
         </dependency>
+
+        <!-- OpenBLAS -->
         <dependency>
             <groupId>org.bytedeco</groupId>
             <artifactId>openblas</artifactId>
             <version>${javacv.openblas.version}</version>
-            <classifier>${javacpp.platform}</classifier>
+            <classifier>linux-x86_64</classifier>
         </dependency>
 
         <!-- 网络请求 -->

@@ -19,6 +19,7 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 
 /**
@@ -34,11 +35,12 @@ import java.util.*;
 @RequestMapping("/alarmCollections")
 public class AlarmCollectionController {
 
-    @Autowired
-    private AlarmCollectionServiceImpl alarmCollectionServiceImpl;
 
     @Autowired
     private CheckAlarmResultServiceImpl checkAlarmResultServiceImpl;
+
+    @Autowired
+    private AlarmCollectionServiceImpl alarmCollectionServiceImpl;
 
     @Autowired
     private OriginalAlarmServiceImpl originalAlarmServiceImpl;
@@ -98,12 +100,12 @@ public class AlarmCollectionController {
         for (AlarmCollection alarmCollection : resultList) {
             JSONObject jsonObject = new JSONObject();
 
-            String[] relatedIds = alarmCollection.getRelatedIdList() != null
-                    ? alarmCollection.getRelatedIdList().split(",")
-                    : new String[0];
+            List<String> relatedIds = alarmCollection.getRelatedIdList() != null
+                    ? Arrays.asList(alarmCollection.getRelatedIdList().split(","))
+                    : Collections.emptyList();
 
-            OriginalAlarmRecord earliestRecord = (relatedIds.length > 0)
-                    ? originalAlarmServiceImpl.getById(relatedIds[0])
+            OriginalAlarmRecord earliestRecord = (relatedIds.size() > 0)
+                    ? originalAlarmServiceImpl.getById(relatedIds.get(0))
                     : null;
 
             jsonObject.put("id", alarmCollection.getCollectionId());
@@ -117,10 +119,8 @@ public class AlarmCollectionController {
             jsonObject.put("updateTime", alarmCollection.getModifyTime());
             jsonObject.put("alarmNum", alarmCollection.getRelatedAlarmNum());
 
-            if (relatedIds.length > 0) {
-                QueryWrapper<OriginalAlarmRecord> queryWrapper = new QueryWrapper<>();
-                queryWrapper.in("id", Arrays.asList(relatedIds));
-                jsonObject.put("alarmList", originalAlarmServiceImpl.list(queryWrapper));
+            if (relatedIds.size() > 0) {
+                jsonObject.put("alarmList", originalAlarmServiceImpl.getListByTblIdList(relatedIds));
             } else {
                 jsonObject.put("alarmList", new JSONArray());
             }
@@ -144,7 +144,6 @@ public class AlarmCollectionController {
                 jsonObject.put("imagePath", null);
                 jsonObject.put("videoPath", null);
             }
-
             jsonArray.add(jsonObject);
         }
 
@@ -225,7 +224,7 @@ public class AlarmCollectionController {
 
             if (relatedIds.length > 0) {
                 QueryWrapper<OriginalAlarmRecord> queryWrapper = new QueryWrapper<>();
-                queryWrapper.in("id", Arrays.asList(relatedIds));
+                queryWrapper.in("tbl_id", Arrays.asList(relatedIds));
                 jsonObject.put("alarmList", originalAlarmServiceImpl.list(queryWrapper));
             } else {
                 jsonObject.put("alarmList", new JSONArray());
@@ -250,7 +249,6 @@ public class AlarmCollectionController {
                 jsonObject.put("imagePath", null);
                 jsonObject.put("videoPath", null);
             }
-
             jsonArray.add(jsonObject);
         }
 
@@ -265,35 +263,59 @@ public class AlarmCollectionController {
      */
     @GetMapping
     public ApiResponse<IPage<AlarmCollection>> list(
-
             @RequestParam(defaultValue = "1") Integer pageNo,
             @RequestParam(defaultValue = "10") Integer pageSize,
-            @RequestParam(required = false) @DateTimeFormat(pattern = "yyyy-MM-dd") LocalDate startDate,
-            @RequestParam(required = false) @DateTimeFormat(pattern = "yyyy-MM-dd") LocalDate endDate,
-            @RequestParam(required = false) String eventType,
+            @RequestParam(required = false) String collectionId,
+            @RequestParam(required = false) String startTime,
+            @RequestParam(required = false) String endTime,
             @RequestParam(required = false) String deviceName,
-            @RequestParam(required = false) Integer disposalAdvice
+            @RequestParam(required = false) String roadId,
+            @RequestParam(required = false) String eventType,
+            @RequestParam(required = false) Integer disposalAdvice,
+            @RequestParam(required = false) Integer checkFlag,
+            @RequestParam(required = false) Integer relatedAlarmNum
     ) {
         Page<AlarmCollection> page = new Page<>(pageNo, pageSize);
         QueryWrapper<AlarmCollection> query = new QueryWrapper<>();
 
-        if (startDate != null) {
-            query.ge("create_time", startDate.atStartOfDay()); // >= 00:00:00
-        }
-        if (endDate != null) {
-            query.le("create_time", endDate.atTime(23, 59, 59)); // <= 23:59:59
+        if (StringUtils.hasText(collectionId)) {
+            query.eq("collection_id", collectionId);
         }
 
-        if (StringUtils.hasText(eventType)) {
-            query.eq("event_type", eventType);
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd");
+
+        if (StringUtils.hasText(startTime)) {
+            LocalDate date = LocalDate.parse(startTime, formatter);
+            query.ge("earliest_alarm_time", date.atStartOfDay());
+        }
+
+        if (StringUtils.hasText(endTime)) {
+            LocalDate date = LocalDate.parse(endTime, formatter);
+            query.le("earliest_alarm_time", date.atTime(23, 59, 59));
         }
 
         if (StringUtils.hasText(deviceName)) {
             query.like("device_name", deviceName); // 模糊匹配 content 字段
         }
 
+        if (StringUtils.hasText(roadId)) {
+            query.eq("road_id", roadId); // 模糊匹配 content 字段
+        }
+
+        if (StringUtils.hasText(eventType)) {
+            query.eq("event_type", eventType);
+        }
+
         if (disposalAdvice != null) {
             query.eq("disposal_advice", disposalAdvice);
+        }
+
+        if (checkFlag != null) {
+            query.eq("check_flag", checkFlag);
+        }
+
+        if (relatedAlarmNum != null) {
+            query.ge("related_alarm_num", relatedAlarmNum);
         }
 
         query.orderByDesc("create_time");
@@ -335,11 +357,11 @@ public class AlarmCollectionController {
 
     /**
      * @desc 根据alarmId查询归属告警集
-     * @param alarmId
+     * @param tblId
      * @return
      */
     @GetMapping("/{alarmId}")
-    public ApiResponse getConnectionByAlarmId(@PathVariable String alarmId) {
-        return ApiResponse.success(alarmCollectionServiceImpl.getCollectionByAlarmId(alarmId));
+    public ApiResponse getConnectionByTblId(@PathVariable long tblId) {
+        return ApiResponse.success(alarmCollectionServiceImpl.getCollectionByTblId(tblId));
     }
 }

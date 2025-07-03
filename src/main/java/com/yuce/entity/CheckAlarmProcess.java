@@ -18,9 +18,17 @@ public class CheckAlarmProcess implements Serializable {
     @TableField("alarm_id")
     private String alarmId;
 
-    /** 图像 ID */
+    /**抽帧图片编号*/
     @TableField("image_id")
     private String imageId;
+
+    /**原始图片地址*/
+    @TableField("image_path")
+    private String imagePath;
+
+    /** 视频地址*/
+    @TableField("video_path")
+    private String videoPath;
 
     /** 接收时间 */
     @TableField("received_time")

@@ -20,6 +20,12 @@ public class CheckAlarmResult {
     @TableField("alarm_id")
     private String alarmId;
 
+    @TableField("image_path")
+    private String imagePath;
+
+    @TableField("video_path")
+    private String videoPath;
+
     @TableField("check_flag")
     private Integer checkFlag; // 0-无法判断，1-正检，2-误检
 

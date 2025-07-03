@@ -1,23 +1,20 @@
 package com.yuce.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
-import com.baomidou.mybatisplus.core.metadata.IPage;
-import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.yuce.config.VideoProperties;
 import com.yuce.entity.CheckAlarmProcess;
 import com.yuce.entity.CheckAlarmResult;
-import com.yuce.entity.QueryResultCheckRecord;
+import com.yuce.entity.OriginalAlarmRecord;
 import com.yuce.mapper.CheckAlarmProcessMapper;
 import com.yuce.mapper.CheckAlarmResultMapper;
 import com.yuce.service.CheckAlarmResultService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
-import org.springframework.util.StringUtils;
 import javax.annotation.PostConstruct;
-import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 
 /**
@@ -33,90 +30,39 @@ import java.util.List;
 @Service
 public class CheckAlarmResultServiceImpl extends ServiceImpl<CheckAlarmResultMapper, CheckAlarmResult> implements CheckAlarmResultService {
 
+    int frameCount = 0;
+
+    @Autowired
+    private VideoProperties videoProperties;
+
     @Autowired
     private CheckAlarmResultMapper checkAlarmResultMapper;
 
     @Autowired
     private CheckAlarmProcessMapper checkAlarmProcessMapper;
 
-    @Autowired
-    private VideoProperties videoProperties;
-
-    int frameCount = 0;
-    @Autowired
-    private CheckAlarmProcessServiceImpl checkAlarmProcessServiceImpl;
-
     @PostConstruct
     public void init() {
         frameCount = videoProperties.getFrameCount();
     }
 
-    @Override
-    public IPage<QueryResultCheckRecord> selectWithOriginaleField(int pageNo, int pageSize,
-                                                                  LocalDate startDate, LocalDate endDate,
-                                                                  String eventType, String content,
-                                                                  Integer checkFlag, String roadName, String directiondes) {
-        Page<QueryResultCheckRecord> page = new Page<>(pageNo, pageSize);
-
-        QueryWrapper<QueryResultCheckRecord> query = new QueryWrapper<>();
-
-        if (startDate != null) {
-            query.ge("alarm_time", startDate.atStartOfDay());
-        }
-        if (endDate != null) {
-            query.le("alarm_time", endDate.atTime(23, 59, 59));
-        }
-        if (StringUtils.hasText(eventType)) {
-            query.eq("event_type", eventType);
-        }
-        if (StringUtils.hasText(content)) {
-            query.like("content", content);
-        }
-        if (checkFlag != null) {
-            // check_flag 是来自关联表的字段，MyBatis-Plus无法自动处理，需要用 Wrapper 传递这个条件
-            query.eq("a.check_flag", checkFlag);
-        }
-        if (StringUtils.hasText(roadName)) {
-            query.like("r.short_name", roadName);
-        }
-        if (StringUtils.hasText(directiondes)) {
-            query.like("o.directiondes", directiondes);
-        }
-
-        query.orderByDesc("o.alarm_time");
-
-        // 调用 Mapper 方法执行分页查询
-        IPage<QueryResultCheckRecord> result = checkAlarmResultMapper.selectWithJoin(page, query);
-
-        return result;
-    }
-
     /**
-     * @desc 根据alarmId查询告警记录是否存在
      * @param alarmId
      * @return
+     * @desc 根据唯一参数组数查询检测结果
      */
-    public boolean existsJudgeByAlarmId(String alarmId) {
+    public CheckAlarmResult getResultByKey(String alarmId, String imagePath, String videoPath) {
         QueryWrapper<CheckAlarmResult> query = new QueryWrapper<>();
         query.eq("alarm_id", alarmId);
-        return checkAlarmResultMapper.exists(query);
-    }
-
-    /**
-     * @desc 根据alarmId查询检验结果
-     * @param alarmId
-     * @return
-     */
-    public CheckAlarmResult getByAlarmId(String alarmId) {
-        QueryWrapper<CheckAlarmResult> query = new QueryWrapper<>();
-        query.eq("alarm_id", alarmId);
+        query.eq("image_path", imagePath);
+        query.eq("video_path", videoPath);
         return checkAlarmResultMapper.selectOne(query);
     }
 
     /**
-     * @desc 根据alarmIdList查询检验结果
      * @param alarmIdList
      * @return
+     * @desc 根据alarmIdList查询检验结果
      */
     public List<CheckAlarmResult> getByAlarmIdList(List<String> alarmIdList) {
         QueryWrapper<CheckAlarmResult> query = new QueryWrapper<>();
@@ -126,34 +72,81 @@ public class CheckAlarmResultServiceImpl extends ServiceImpl<CheckAlarmResultMap
     }
 
     /**
+     * @param record
+     * @param iouConfig
+     * @param rightCheckNumConfig
      * @desc 根据IOU确定算法核检结果
-     * @param alarmId
      */
-    public void checkResultByIou(String alarmId, double iouConfig, int rightCheckNumConfig) {
+    public void checkResultByIou(OriginalAlarmRecord record, double iouConfig, int rightCheckNumConfig) {
 
-        //查询算法检验结果列表
-        QueryWrapper<CheckAlarmProcess> checkWrapper = new QueryWrapper<>();
-        checkWrapper.eq("alarm_id", alarmId);
+        Long tblId = record.getTblId();
+        String alarmId = record.getId();
+        String imagePath = record.getImagePath();
+        String videoPath = record.getVideoPath();
 
         //抽帧图片逐个判定检验结果
         int rightCheckNum = 0;
         for (int i = 0; i < frameCount; i++) {
-            String imageId = alarmId + "_" + i;
-            checkWrapper.eq("image_id", imageId);
-            double iou = checkAlarmProcessServiceImpl.getIouTop1ByAlarmIdAndImgId(alarmId, imageId).getIou();
+            String imageId = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd")) + "_" + record.getId() + "_" + i + "_" + record.getTblId();
+            double iou = checkAlarmProcessMapper.getIouTop1ByKeyAndPic(alarmId, imagePath, videoPath, imageId).getIou();
             if (iou >= iouConfig) {
+                log.info("正检判定：alarmId->{}, imagePath->{}, videoPath->{}, imageId->{}, iou->{}, rightCheckNum->{}", alarmId, imagePath, videoPath, imageId, iou, rightCheckNum);
                 rightCheckNum++;
+            }else{
+                log.info("误检判定：alarmId->{}, imagePath->{}, videoPath->{}, imageId->{}, iou->{}, rightCheckNum->{}", alarmId, imagePath, videoPath, imageId, iou, rightCheckNum);
             }
         }
-
         int checkFlag = 0;
-        if(rightCheckNum >= rightCheckNumConfig) {
+        if (rightCheckNum >= rightCheckNumConfig) {
             checkFlag = 1;
-        }else {
+        } else {
             checkFlag = 2;
         }
 
-        CheckAlarmResult existing = getByAlarmId(alarmId);
+        CheckAlarmResult checkAlarmResult = new CheckAlarmResult();
+        checkAlarmResult.setAlarmId(alarmId);
+        checkAlarmResult.setCheckFlag(checkFlag);
+        checkAlarmResult.setImagePath(imagePath);
+        checkAlarmResult.setVideoPath(videoPath);
+        checkAlarmResult.setCheckTime(LocalDateTime.now());
+
+        CheckAlarmResult existing = getResultByKey(alarmId, imagePath, videoPath);
+        if (existing != null) {
+            // 更新已有记录
+            log.info("检测结果已存在，更新检测结果：alarmId->{}, imagePath->{}, videoPath->{}", alarmId, imagePath, videoPath);
+            checkAlarmResult.setId(existing.getId());
+            checkAlarmResult.setUpdateTime(LocalDateTime.now());
+            checkAlarmResultMapper.updateById(checkAlarmResult);
+        } else {
+            log.info("未进行检测判定，插入检测结果：alarmId->{}, imagePath->{}, videoPath->{}", alarmId, imagePath, videoPath);
+            checkAlarmResult.setUpdateTime(LocalDateTime.now());
+            checkAlarmResult.setCreateTime(LocalDateTime.now());
+            checkAlarmResultMapper.insert(checkAlarmResult);
+        }
+        log.info("iou检测完成：记录id->{}, alarmId->{}, checkFlag->{}", tblId, alarmId, checkFlag);
+    }
+
+    /**
+     * @param record
+     * @param type
+     * @desc 根据图片数量确定算法核检结果
+     */
+    public void checkResultByImgNum(OriginalAlarmRecord record, String type) {
+
+        String alarmId = record.getId();
+        String imagePath = record.getImagePath();
+        String videoPath = record.getVideoPath();
+
+        //查询算法检验结果列表
+        List<CheckAlarmProcess> list = checkAlarmProcessMapper.getListByKeyAndType(alarmId, imagePath, videoPath, type);
+        int checkFlag = 0;
+        if (list.size() > 0) {
+            checkFlag = 1;
+        } else {
+            checkFlag = 2;
+        }
+
+        CheckAlarmResult existing = checkAlarmResultMapper.getResultByKey(alarmId, imagePath, videoPath);
         if (existing != null) {
             // 更新已有记录
             existing.setCheckFlag(checkFlag);
@@ -164,6 +157,8 @@ public class CheckAlarmResultServiceImpl extends ServiceImpl<CheckAlarmResultMap
             // 新增记录
             CheckAlarmResult checkAlarmResult = new CheckAlarmResult();
             checkAlarmResult.setAlarmId(alarmId);
+            checkAlarmResult.setImagePath(imagePath);
+            checkAlarmResult.setVideoPath(videoPath);
             checkAlarmResult.setCheckFlag(checkFlag);
             checkAlarmResult.setCheckTime(LocalDateTime.now());
             checkAlarmResult.setUpdateTime(LocalDateTime.now());
@@ -173,36 +168,12 @@ public class CheckAlarmResultServiceImpl extends ServiceImpl<CheckAlarmResultMap
     }
 
     /**
-     * @desc 根据图片数量确定算法核检结果
-     * @param alarmId
+     * @param checkAlarmResult
+     * @desc 插入新纪录
      */
-    public void checkResultByImgNum(String alarmId, String type) {
-
-        //查询算法检验结果列表
-        List<CheckAlarmProcess> list = checkAlarmProcessServiceImpl.getListByAlarmIdAndType(alarmId,type);
-        int checkFlag = 0;
-        if(list.size()>0) {
-            checkFlag = 1;
-        }else {
-            checkFlag = 2;
-        }
-
-        CheckAlarmResult existing = getByAlarmId(alarmId);
-        if (existing != null) {
-            // 更新已有记录
-            existing.setCheckFlag(checkFlag);
-            existing.setUpdateTime(LocalDateTime.now());
-            existing.setCheckTime(LocalDateTime.now());
-            checkAlarmResultMapper.updateById(existing);
-        } else {
-            // 新增记录
-            CheckAlarmResult checkAlarmResult = new CheckAlarmResult();
-            checkAlarmResult.setAlarmId(alarmId);
-            checkAlarmResult.setCheckFlag(checkFlag);
-            checkAlarmResult.setCheckTime(LocalDateTime.now());
-            checkAlarmResult.setUpdateTime(LocalDateTime.now());
-            checkAlarmResult.setCreateTime(LocalDateTime.now());
-            checkAlarmResultMapper.insert(checkAlarmResult);
-        }
+    public void insert(CheckAlarmResult checkAlarmResult) {
+        checkAlarmResult.setCreateTime(LocalDateTime.now());
+        checkAlarmResult.setUpdateTime(LocalDateTime.now());
+        checkAlarmResultMapper.insert(checkAlarmResult);
     }
 }

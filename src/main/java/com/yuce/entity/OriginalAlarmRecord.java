@@ -2,15 +2,26 @@ package com.yuce.entity;
 
 import com.baomidou.mybatisplus.annotation.*;
 import lombok.Data;
+
+import java.io.Serializable;
 import java.time.LocalDateTime;
 import java.util.Date;
 
 @Data
-@TableName("kafka_original_alarm_record") // 数据库表名，需与你的实际表名一致
-public class OriginalAlarmRecord {
+@TableName("kafka_original_alarm_record")
+public class OriginalAlarmRecord implements Serializable {
 
-    @TableId(value = "id", type = IdType.ASSIGN_ID)
-    private String id; // 主键ID
+    @TableId(value = "tbl_id", type = IdType.AUTO)
+    private Long tblId; // 自增主键
+
+    @TableField("alarm_id")
+    private String id; // 原始数据中的业务ID
+
+    @TableField("image_path")
+    private String imagePath;
+
+    @TableField("video_path")
+    private String videoPath;
 
     @TableField("event_id")
     private String eventId;
@@ -59,12 +70,6 @@ public class OriginalAlarmRecord {
 
     @TableField("content_custom")
     private String contentCustom;
-
-    @TableField("image_path")
-    private String imagePath;
-
-    @TableField("video_path")
-    private String videoPath;
 
     @TableField("source")
     private String source;
@@ -172,20 +177,20 @@ public class OriginalAlarmRecord {
     private String tollId;
 
     @TableField("create_time")
-    private Date createTime;
+    private String createTime;
 
     @TableField("create_time_sys")
-    private Date createTimeSys;
+    private String createTimeSys;
 
     @TableField("modify_time_sys")
-    private Date modifyTimeSys;
+    private String modifyTimeSys;
 
     @TableField("consume_tag")
     private Integer consumeTag;
 
-    @TableField("db_create_time")
-    private Date dbCreateTime;
+    @TableField(value = "db_create_time", fill = FieldFill.INSERT)
+    private LocalDateTime dbCreateTime;
 
-    @TableField("db_update_time")
-    private Date dbUpdateTime;
+    @TableField(value = "db_update_time", fill = FieldFill.INSERT_UPDATE)
+    private LocalDateTime dbUpdateTime;
 }

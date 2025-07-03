@@ -10,7 +10,6 @@ import java.time.LocalDateTime;
 public class AlarmCollection {
 
     @TableId(type = IdType.AUTO)
-    @TableField("id")
     private Integer id; // 自增主键ID
 
     @TableField("collection_id")

@@ -6,6 +6,7 @@ import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.core.toolkit.Constants;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.yuce.entity.CheckAlarmResult;
+import com.yuce.entity.ExtractWindowRecord;
 import com.yuce.entity.QueryResultCheckRecord;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
@@ -24,14 +25,8 @@ import org.apache.ibatis.annotations.Select;
 @Mapper
 public interface CheckAlarmResultMapper extends BaseMapper<CheckAlarmResult> {
 
-    @Select("SELECT o.*, " +
-            "a.check_flag," +
-            "f.disposal_advice as advice_flag, " +
-            "r.short_name " +
-            "FROM kafka_original_alarm_record o " +
-            "LEFT JOIN algorithm_check_result a ON o.id = a.alarm_id " +
-            "LEFT JOIN feature_element_record f ON o.id = f.alarm_id " +
-            "LEFT JOIN road_info r ON o.road_id = r.short_name " +
-            "${ew.customSqlSegment}")
-    IPage<QueryResultCheckRecord> selectWithJoin(Page<?> page, @Param(Constants.WRAPPER) QueryWrapper<QueryResultCheckRecord> wrapper);
+    @Select("SELECT * FROM algorithm_check_result WHERE alarm_id = #{alarmId} AND image_path = #{imagePath} AND video_path = #{videoPath} LIMIT 1")
+    CheckAlarmResult getResultByKey(@Param("alarmId") String alarmId,
+                                       @Param("imagePath") String imagePath,
+                                       @Param("videoPath") String videoPath);
 }

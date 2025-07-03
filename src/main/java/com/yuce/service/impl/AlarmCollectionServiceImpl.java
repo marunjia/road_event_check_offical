@@ -6,15 +6,14 @@ import com.yuce.entity.AlarmCollection;
 import com.yuce.mapper.AlarmCollectionMapper;
 import com.yuce.service.AlarmCollectionService;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 /**
- * @ClassName AlarmCollectionService
+ * @ClassName AlarmCollectionServiceImpl
  * @Description TODO
  * @Author jacksparrow
  * @Email 18310124408@163.com
- * @Date 2025/5/15 16:53
+ * @Date 2025/7/25 15:24
  * @Version 1.0
  */
 
@@ -22,8 +21,18 @@ import org.springframework.stereotype.Service;
 @Slf4j
 public class AlarmCollectionServiceImpl extends ServiceImpl<AlarmCollectionMapper, AlarmCollection> implements AlarmCollectionService {
 
-    @Autowired
-    private AlarmCollectionMapper alarmCollectionMapper;
+    /**
+     * @desc 根拒设备id、告警集类型查看告警集是否存在
+     * @param deviceId
+     * @param collectionType
+     * @return
+     */
+    public boolean existsCollection(String deviceId, int collectionType) {
+        QueryWrapper<AlarmCollection> queryWrapper = new QueryWrapper<>();
+        queryWrapper.eq("device_id", deviceId);
+        queryWrapper.eq("collection_type", collectionType);
+        return this.count(queryWrapper) > 0;
+    }
 
     /**
      * @desc 根拒设备id查看告警集是否存在
@@ -31,18 +40,21 @@ public class AlarmCollectionServiceImpl extends ServiceImpl<AlarmCollectionMappe
      * @param collectionType
      * @return
      */
-    public AlarmCollection existsCollection(String deviceId, int collectionType) {
-        return alarmCollectionMapper.selectLastByDeviceIdAndType(deviceId, collectionType);
+    public AlarmCollection getCollectionByKey(String deviceId, int collectionType) {
+        QueryWrapper<AlarmCollection> queryWrapper = new QueryWrapper<>();
+        queryWrapper.eq("device_id", deviceId);
+        queryWrapper.eq("collection_type", collectionType);
+        return this.getOne(queryWrapper,false);
     }
 
     /**
-     * @desc 根据告警id查询归属告警集
-     * @param alarmId
+     * @desc 根据tblId查询归属告警集
+     * @param tblId
      * @return
      */
-    public AlarmCollection getCollectionByAlarmId(String alarmId) {
+    public AlarmCollection getCollectionByTblId(long tblId) {
         QueryWrapper<AlarmCollection> queryWrapper = new QueryWrapper<>();
-        queryWrapper.apply("FIND_IN_SET({0}, related_id_list)", alarmId);
-        return alarmCollectionMapper.selectOne(queryWrapper);
+        queryWrapper.apply("FIND_IN_SET({0}, related_id_list)", tblId);
+        return this.getOne(queryWrapper);
     }
 }

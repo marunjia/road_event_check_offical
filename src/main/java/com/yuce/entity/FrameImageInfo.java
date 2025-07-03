@@ -18,6 +18,12 @@ public class FrameImageInfo {
     @TableField("alarm_id")
     private String alarmId; // 关联告警事件ID（外键）
 
+    @TableField("image_path")
+    private String imagePath; // 图片链接
+
+    @TableField("video_path")
+    private String videoPath; // 视频链接
+
     @TableField("frame_num")
     private Integer frameNum; // 抽帧帧数
 

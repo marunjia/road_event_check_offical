@@ -1,7 +1,11 @@
 package com.yuce.service;
 
+import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.service.IService;
 import com.yuce.entity.OriginalAlarmRecord;
+import com.yuce.entity.QueryResultCheckRecord;
+
+import java.time.LocalDateTime;
 
 /**
  * @ClassName OriginalEventAlarmRecordService
@@ -14,4 +18,6 @@ import com.yuce.entity.OriginalAlarmRecord;
 public interface OriginalAlarmService extends IService<OriginalAlarmRecord> {
     // 可以定义一些业务逻辑的方法，例如自定义的保存方法
     void saveIfNotExists(OriginalAlarmRecord record);
+
+    IPage<QueryResultCheckRecord> selectWithOriginaleField(String alarmId, String startDate, String endDate, String deviceName ,String roadId, String direction, String eventType, Integer dealFlag, Integer checkFlag, Integer disposalAdvice, String adviceReason, int pageNo, int pageSize);
 }
