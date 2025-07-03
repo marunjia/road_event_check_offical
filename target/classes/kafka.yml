@@ -1,0 +1,18 @@
+kafka:
+  bootstrap-servers:
+    - 12.1.150.178:9082
+    - 12.1.150.179:9082
+    - 12.1.150.180:9082
+    - 12.1.150.91:9082
+    - 12.1.150.92:9082
+  consumer:
+    group-id: video-alarm-consumer-group
+    enable-auto-commit: false
+    auto-offset-reset: earliest # earliest: 从头消费；latest: 从最新开始
+    max-poll-records: 500
+    key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+    value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+    fetch-max-bytes: 52428800
+
+  topic:
+    video-alarm-detail: DATA_COLLECT_VIDEO_ALARM_DETAIL

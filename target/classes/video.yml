@@ -1,0 +1,5 @@
+video:
+  frame-count: 3
+  frame-interval: 30
+  output-dir: /data/image/snap
+  #output-dir: /Users/jacksparrow/data
