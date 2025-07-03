@@ -1,0 +1,4 @@
+alarm-collection:
+  right-interval-minute: 10
+  false-interval-minute: 30
+  uncertain-interval-minute: 60

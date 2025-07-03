@@ -1,0 +1,10 @@
+server:
+  port: 9095
+
+spring:
+  config:
+    import:
+      - optional:classpath:database.yml
+      - optional:classpath:video.yml
+      - optional:classpath:alarm-collection.yml
+      - optional:classpath:kafka.yml
