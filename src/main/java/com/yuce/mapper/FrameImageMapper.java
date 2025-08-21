@@ -71,4 +71,21 @@ public interface FrameImageMapper extends BaseMapper<FrameImageInfo> {
     int deleteByKey(@Param("alarmId") String alarmId,
                     @Param("imagePath") String imagePath,
                     @Param("videoPath") String videoPath);
+
+    /**
+     * @desc 根据alarmId、imagePath、videoPath、image_sort_no查询抽帧图片
+     * @param alarmId
+     * @param imagePath
+     * @param videoPath
+     * @return
+     */
+    @Select("SELECT * FROM alarm_frame_image_info " +
+            "WHERE alarm_id = #{alarmId} " +
+            "AND image_path = #{imagePath} " +
+            "AND video_path = #{videoPath} " +
+            "AND image_sort_no = #{imageSortNo} ")
+    FrameImageInfo getFrameByKeyAndNo(@Param("alarmId") String alarmId,
+                                      @Param("imagePath") String imagePath,
+                                      @Param("videoPath") String videoPath,
+                                      @Param("imageSortNo") int imageSortNo);
 }

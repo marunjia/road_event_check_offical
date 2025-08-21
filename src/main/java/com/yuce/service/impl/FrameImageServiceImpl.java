@@ -89,4 +89,23 @@ public class FrameImageServiceImpl extends ServiceImpl<FrameImageMapper, FrameIm
         frameImageMapper.deleteByKey(alarmId, imagePath, videoPath);
     }
 
+    /**
+     * 检查是否已存在抽帧记录
+     */
+    public Integer getNumByKey(String alarmId, String imagePath, String videoPath) {
+        return frameImageMapper.getFrameListByKey(alarmId, imagePath, videoPath).size();
+    }
+
+    /**
+     * @desc 根据key值和图片编号查询抽帧图片信息
+     * @param alarmId
+     * @param imagePath
+     * @param videoPath
+     * @param imageSortNo
+     * @return
+     */
+    public FrameImageInfo getFrameByKeyAndNo(String alarmId, String imagePath, String videoPath, int imageSortNo) {
+        return frameImageMapper.getFrameByKeyAndNo(alarmId, imagePath, videoPath, imageSortNo);
+    }
+
 }

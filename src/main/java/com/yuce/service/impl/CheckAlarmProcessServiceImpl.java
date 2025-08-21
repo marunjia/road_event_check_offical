@@ -33,12 +33,7 @@ public class CheckAlarmProcessServiceImpl extends ServiceImpl<CheckAlarmProcessM
      * @return
      */
     public int countDistinctImageId(String alarmId, String imagePath, String videoPath) {
-        QueryWrapper<CheckAlarmProcess> queryWrapper = new QueryWrapper<>();
-        queryWrapper.eq("alarm_id", alarmId);
-        queryWrapper.eq("image_path", imagePath);
-        queryWrapper.eq("video_path", videoPath);
-        queryWrapper.groupBy("image_id");
-        return this.list(queryWrapper).size();
+        return checkAlarmProcessMapper.countDistinctImageId(alarmId, imagePath, videoPath);
     }
 
     /**

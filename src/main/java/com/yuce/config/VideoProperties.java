@@ -20,5 +20,6 @@ import org.springframework.stereotype.Component;
 public class VideoProperties {
     private int frameCount; //抽帧数量
     private int frameInterval; //帧数间隔
-    private String outputDir; //输出文件路径
+    private String imageBaseDir; //图片文件存储路径
+    private String videoBaseDir; //视频文件存储路径
 }

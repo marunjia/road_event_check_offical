@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.core.toolkit.Constants;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.yuce.entity.AlarmTimeRange;
 import com.yuce.entity.CheckAlarmResult;
 import com.yuce.entity.OriginalAlarmRecord;
 import com.yuce.entity.QueryResultCheckRecord;
@@ -28,140 +29,6 @@ import java.util.List;
 public interface OriginalAlarmMapper extends BaseMapper<OriginalAlarmRecord> {
 
     /**
-     * @desc 根据告警id、图片路径、视频路径组成的联合主键判断记录是否存在
-     * @param alarmId
-     * @param imagePath
-     * @param videoPath
-     * @return
-     */
-    @Select("SELECT * FROM kafka_original_alarm_record WHERE alarm_id = #{alarmId} and image_path = #{imagePath} and video_path = #{videoPath} ")
-    boolean existsByKey(@Param("alarmId")String alarmId, @Param("imagePath")String imagePath, @Param("videoPath")String videoPath);
-
-    /**
-     * @desc 根据告警id、图片路径、视频路径组成的联合主键判断记录是否存在
-     * @param alarmId
-     * @param imagePath
-     * @param videoPath
-     * @return
-     */
-    @Select("SELECT * FROM kafka_original_alarm_record WHERE alarm_id = #{alarmId} and image_path = #{imagePath} and video_path = #{videoPath} ")
-    OriginalAlarmRecord getRecordByKey(@Param("alarmId")String alarmId, @Param("imagePath")String imagePath, @Param("videoPath")String videoPath);
-
-    /**
-     * @desc 根据关联alarmIdList查询所有告警记录明细
-     * @param relatedIdList
-     * @return
-     */
-    @Select({
-            "<script>",
-            "SELECT * FROM kafka_original_alarm_record",
-            "WHERE alarm_id IN",
-            "<foreach item='alarm_id' index='index' collection='relatedIdList' open='(' separator=',' close=')'>",
-            "#{alarm_id}",
-            "</foreach>",
-            "ORDER BY alarm_time DESC",
-            "</script>"
-    })
-    List<OriginalAlarmRecord> getListByIdList(@Param("relatedIdList") List<String> relatedIdList);
-
-    /**
-     * @desc 查询告警集关联告警记录中被打标为事件的记录
-     * @param relatedIdList
-     * @return
-     */
-    @Select({
-            "<script>",
-            "SELECT * FROM kafka_original_alarm_record",
-            "WHERE alarm_id IN ",
-            "<foreach collection='relatedIdList' item='alarm_id' open='(' separator=',' close=')'>",
-            "#{alarm_id}",
-            "</foreach>",
-            "AND deal_flag = '1' ",
-            "ORDER BY alarm_time DESC",
-            "</script>"
-    })
-    List<OriginalAlarmRecord> getEventByIdList(@Param("relatedIdList") List<String> relatedIdList);
-
-
-    /**
-     * @desc 根据关联alarmIdList查询所有告警记录明细
-     * @param relatedList
-     * @return
-     */
-    @Select({
-            "<script>",
-            "SELECT * FROM kafka_original_alarm_record",
-            "WHERE tbl_id IN",
-            "<foreach item='id' collection='relatedList' open='(' separator=',' close=')'>",
-            "#{id}",
-            "</foreach>",
-            "AND deal_flag = '1'",
-            "ORDER BY alarm_time DESC",
-            "</script>"
-    })
-    List<OriginalAlarmRecord> getListByDealFlag(@Param("relatedList") List<String> relatedList);
-
-    /**
-     * @desc 查询未被标记为事件的记录
-     * @param relatedList
-     * @return
-     */
-    @Select({
-            "<script>",
-            "SELECT * FROM kafka_original_alarm_record",
-            "WHERE tbl_id IN",
-            "<foreach item='id' collection='relatedList' open='(' separator=',' close=')'>",
-            "#{id}",
-            "</foreach>",
-            "AND deal_flag != '1'",
-            "ORDER BY alarm_time DESC",
-            "</script>"
-    })
-    List<OriginalAlarmRecord> getUnConfirmList(@Param("relatedList") List<String> relatedList);
-
-    /**
-     * @desc 根据时间范围查询未被标记为事件的记录
-     * @param relatedList
-     * @param alarmTime
-     * @return
-     */
-    @Select({
-            "<script>",
-            "SELECT * FROM kafka_original_alarm_record",
-            "WHERE tbl_id IN",
-            "<foreach item='id' collection='relatedList' open='(' separator=',' close=')'>",
-            "#{id}",
-            "</foreach>",
-            "AND deal_flag != '1'",
-            "AND alarm_time &gt; #{alarmTime}",
-            "ORDER BY alarm_time DESC",
-            "</script>"
-    })
-    List<OriginalAlarmRecord> getUnConfirmListWithTime(
-            @Param("relatedList") List<String> relatedList,
-            @Param("alarmTime") LocalDateTime alarmTime
-    );
-
-    /**
-     * @desc 查询最新一条被确认为事件的记录
-     * @param relatedList
-     * @return
-     */
-    @Select({
-            "<script>",
-            "SELECT * FROM kafka_original_alarm_record",
-            "WHERE tbl_id IN",
-            "<foreach item='id' collection='relatedList' open='(' separator=',' close=')'>",
-            "#{id}",
-            "</foreach>",
-            "AND deal_flag = '1'",
-            "ORDER BY alarm_time DESC",
-            "LIMIT 1",
-            "</script>"
-    })
-    OriginalAlarmRecord getLatestConfirm(@Param("relatedList") List<String> relatedList);
-
-    /**
      * @desc 根据设备id、事件类型查询告警最新一条告警记录
      * @param deviceId
      * @param eventType
@@ -179,7 +46,9 @@ public interface OriginalAlarmMapper extends BaseMapper<OriginalAlarmRecord> {
     @Select("SELECT \n" +
             "    o.*, \n" +
             "    a.check_flag, \n" +
+            "    f.id AS feature_id, \n" +
             "    f.disposal_advice AS advice_flag, \n" +
+            "    f.person_check_flag AS person_check_flag, \n" +
             "    f.advice_reason AS advice_reason, \n" +
             "    r.short_name \n" +
             "FROM kafka_original_alarm_record o\n" +
@@ -195,4 +64,43 @@ public interface OriginalAlarmMapper extends BaseMapper<OriginalAlarmRecord> {
             "    ON o.road_id = r.id " +
             "${ew.customSqlSegment}")
     IPage<QueryResultCheckRecord> selectWithJoin(Page<?> page, @Param(Constants.WRAPPER) QueryWrapper<QueryResultCheckRecord> wrapper);
+
+
+    @Select({
+            "<script>",
+            "SELECT MIN(alarm_time) AS minAlarmTime,",
+            "       MAX(alarm_time) AS maxAlarmTime",
+            "FROM kafka_original_alarm_record",
+            "WHERE tbl_id IN",
+            "<foreach collection='tblIdList' item='id' open='(' separator=',' close=')'>",
+            "#{id}",
+            "</foreach>",
+            "</script>"
+    })
+    AlarmTimeRange getTimeRangeByTblIdList(@Param("tblIdList") List<String> tblIdList);
+
+    @Select({
+            "<script>",
+            "SELECT t1.*",
+            "FROM (",
+            "    SELECT * FROM kafka_original_alarm_record",
+            "    WHERE tbl_id IN",
+            "    <foreach collection='tblIdList' item='id' open='(' separator=',' close=')'>",
+            "        #{id}",
+            "    </foreach>",
+            ") t1",
+            "LEFT JOIN algorithm_check_result t2",
+            "ON t1.alarm_id = t2.alarm_id",
+            "AND t1.image_path = t2.image_path",
+            "AND t1.video_path = t2.video_path",
+            "WHERE 1 = 1",
+            "  <if test='checkFlag != null'>",
+            "    AND t2.check_flag = #{checkFlag}",
+            "  </if>",
+            "</script>"
+    })
+    List<OriginalAlarmRecord> getListByTblIdList(
+            @Param("tblIdList") List<String> tblIdList,
+            @Param("checkFlag") Integer checkFlag
+    );
 }

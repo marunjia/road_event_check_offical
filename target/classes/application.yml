@@ -8,6 +8,15 @@ spring:
       - optional:classpath:video.yml
       - optional:classpath:alarm-collection.yml
       - optional:classpath:kafka.yml
+
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.autoconfigure.security.servlet.SecurityAutoConfiguration
+
 logging:
   file:
     path: logs_test
+
+mybatis-plus:
+  configuration:
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl

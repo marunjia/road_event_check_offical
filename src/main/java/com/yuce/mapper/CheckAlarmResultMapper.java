@@ -12,6 +12,8 @@ import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 
+import java.util.List;
+
 
 /**
  * @ClassName CheckAlarmRecordMapper
@@ -29,4 +31,19 @@ public interface CheckAlarmResultMapper extends BaseMapper<CheckAlarmResult> {
     CheckAlarmResult getResultByKey(@Param("alarmId") String alarmId,
                                        @Param("imagePath") String imagePath,
                                        @Param("videoPath") String videoPath);
+
+    @Select("SELECT t2.device_id \n" +
+            "    FROM (\n" +
+            "        SELECT *\n" +
+            "        FROM algorithm_check_result\n" +
+            "        WHERE check_flag = 2" +
+            "        AND id <= #{id}\n" +
+            "        ORDER BY create_time DESC\n" +
+            "        LIMIT 50\n" +
+            "    ) t1\n" +
+            "    LEFT JOIN kafka_original_alarm_record t2\n" +
+            "        ON t1.alarm_id = t2.alarm_id\n" +
+            "        AND t1.image_path = t2.image_path\n" +
+            "        AND t1.video_path = t2.video_path")
+    List<String> getRecentFalseCheckList(@Param("id") Long id);
 }

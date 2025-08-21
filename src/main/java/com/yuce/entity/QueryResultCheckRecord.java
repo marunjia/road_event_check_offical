@@ -76,7 +76,9 @@ public class QueryResultCheckRecord {
     private LocalDateTime dbCreateTime; // 数据库创建时间
     private LocalDateTime dbUpdateTime;
     private int checkFlag; //检查表示
+    private int featureId; //特征要素主键
     private int adviceFlag; //建议标识
+    private int personCheckFlag; //人工打标标签
     private String adviceReason; //建议依据
     private String short_name; //路段名称简写
 }

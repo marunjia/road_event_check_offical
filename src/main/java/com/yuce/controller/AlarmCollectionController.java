@@ -100,8 +100,8 @@ public class AlarmCollectionController {
         for (AlarmCollection alarmCollection : resultList) {
             JSONObject jsonObject = new JSONObject();
 
-            List<String> relatedIds = alarmCollection.getRelatedIdList() != null
-                    ? Arrays.asList(alarmCollection.getRelatedIdList().split(","))
+            List<String> relatedIds = alarmCollection.getRelatedTblIdList() != null
+                    ? Arrays.asList(alarmCollection.getRelatedTblIdList().split(","))
                     : Collections.emptyList();
 
             OriginalAlarmRecord earliestRecord = (relatedIds.size() > 0)
@@ -118,6 +118,7 @@ public class AlarmCollectionController {
             jsonObject.put("createTime", alarmCollection.getCreateTime());
             jsonObject.put("updateTime", alarmCollection.getModifyTime());
             jsonObject.put("alarmNum", alarmCollection.getRelatedAlarmNum());
+            jsonObject.put("collectionStatus", alarmCollection.getCollectionStatus());
 
             if (relatedIds.size() > 0) {
                 jsonObject.put("alarmList", originalAlarmServiceImpl.getListByTblIdList(relatedIds));
@@ -203,8 +204,8 @@ public class AlarmCollectionController {
         for (AlarmCollection alarmCollection : resultList) {
             JSONObject jsonObject = new JSONObject();
 
-            String[] relatedIds = alarmCollection.getRelatedIdList() != null
-                    ? alarmCollection.getRelatedIdList().split(",")
+            String[] relatedIds = alarmCollection.getRelatedTblIdList() != null
+                    ? alarmCollection.getRelatedTblIdList().split(",")
                     : new String[0];
 
             OriginalAlarmRecord earliestRecord = (relatedIds.length > 0)
@@ -221,6 +222,7 @@ public class AlarmCollectionController {
             jsonObject.put("createTime", alarmCollection.getCreateTime());
             jsonObject.put("updateTime", alarmCollection.getModifyTime());
             jsonObject.put("alarmNum", alarmCollection.getRelatedAlarmNum());
+            jsonObject.put("collectionStatus", alarmCollection.getCollectionStatus());
 
             if (relatedIds.length > 0) {
                 QueryWrapper<OriginalAlarmRecord> queryWrapper = new QueryWrapper<>();
@@ -268,12 +270,14 @@ public class AlarmCollectionController {
             @RequestParam(required = false) String collectionId,
             @RequestParam(required = false) String startTime,
             @RequestParam(required = false) String endTime,
+            @RequestParam(required = false) String deviceId,
             @RequestParam(required = false) String deviceName,
             @RequestParam(required = false) String roadId,
             @RequestParam(required = false) String eventType,
             @RequestParam(required = false) Integer disposalAdvice,
             @RequestParam(required = false) Integer checkFlag,
-            @RequestParam(required = false) Integer relatedAlarmNum
+            @RequestParam(required = false) Integer relatedAlarmNum,
+            @RequestParam(required = false) Integer collectionType
     ) {
         Page<AlarmCollection> page = new Page<>(pageNo, pageSize);
         QueryWrapper<AlarmCollection> query = new QueryWrapper<>();
@@ -291,7 +295,11 @@ public class AlarmCollectionController {
 
         if (StringUtils.hasText(endTime)) {
             LocalDate date = LocalDate.parse(endTime, formatter);
-            query.le("earliest_alarm_time", date.atTime(23, 59, 59));
+            query.le("latest_alarm_time", date.atTime(23, 59, 59));
+        }
+
+        if (StringUtils.hasText(deviceId)) {
+            query.eq("device_id", deviceId);
         }
 
         if (StringUtils.hasText(deviceName)) {
@@ -318,7 +326,11 @@ public class AlarmCollectionController {
             query.ge("related_alarm_num", relatedAlarmNum);
         }
 
-        query.orderByDesc("create_time");
+        if (collectionType != null) {
+            query.eq("collection_type", collectionType);
+        }
+
+        query.orderByDesc("latest_alarm_time");
 
         IPage<AlarmCollection> result = alarmCollectionServiceImpl.page(page, query);
         return ApiResponse.success(result);
@@ -327,7 +339,7 @@ public class AlarmCollectionController {
     @GetMapping("/{id}/relatedEvents")
     public ApiResponse getRelatedEvents(@PathVariable Integer id) {
         AlarmCollection alarmCollection = alarmCollectionServiceImpl.getById(id);
-        String[] idList = alarmCollection.getRelatedIdList().split(",");
+        String[] idList = alarmCollection.getRelatedTblIdList().split(",");
 
         JSONArray resultJsonArray = new JSONArray();
         for (int i = idList.length - 1; i >= 0; i--) {
@@ -363,5 +375,47 @@ public class AlarmCollectionController {
     @GetMapping("/{alarmId}")
     public ApiResponse getConnectionByTblId(@PathVariable long tblId) {
         return ApiResponse.success(alarmCollectionServiceImpl.getCollectionByTblId(tblId));
+    }
+
+    /**
+     * @desc 根据collectionId查询告警集信息
+     * @param collectionId
+     * @return
+     */
+    @GetMapping("/query/byCollectionId")
+    public ApiResponse getConnectionByTblId(@RequestParam String collectionId) {
+        return ApiResponse.success(alarmCollectionServiceImpl.getCollectionByCollectionId(collectionId));
+    }
+
+    @PutMapping("/update/personCheckFlag/byCollectionId")
+    public ApiResponse updatePersonCheckFlag(@RequestParam String collectionId,
+                                             @RequestParam Integer personCheckFlag) {
+        if (collectionId == null || personCheckFlag == null) {
+            return ApiResponse.fail(400,"参数collectionId、personCheckFlag不能为空");
+        }
+
+        int affectRows = alarmCollectionServiceImpl.updatePersonCheckFlag(collectionId, personCheckFlag);
+
+        if (affectRows > 0) {
+            return ApiResponse.success("更新成功");
+        } else {
+            return ApiResponse.fail(401,"更新失败，未找到对应记录");
+        }
+    }
+
+    @PutMapping("/update/personCheckReason/byCollectionId")
+    public ApiResponse updatePersonCheckFlag(@RequestParam String collectionId,
+                                             @RequestParam String personCheckReason) {
+        if (collectionId == null || personCheckReason == null) {
+            return ApiResponse.fail(400,"参数collectionId、personCheckFlag不能为空");
+        }
+
+        int affectRows = alarmCollectionServiceImpl.updatePersonCheckReason(collectionId, personCheckReason);
+
+        if (affectRows > 0) {
+            return ApiResponse.success("更新成功");
+        } else {
+            return ApiResponse.fail(401,"更新失败，未找到对应记录");
+        }
     }
 }

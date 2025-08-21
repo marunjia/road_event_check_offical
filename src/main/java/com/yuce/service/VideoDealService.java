@@ -13,5 +13,5 @@ import org.bytedeco.javacv.Frame;
  */
 public interface VideoDealService {
 
-    public boolean extractImage(OriginalAlarmRecord originalAlarmRecord);
+    void extractFrame(OriginalAlarmRecord originalAlarmRecord) throws Exception ;
 }

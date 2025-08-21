@@ -4,10 +4,7 @@ import com.yuce.common.ApiResponse;
 import com.yuce.service.impl.FeatureElementServiceImpl;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
 /**
  * @ClassName FeatureElementController
@@ -20,7 +17,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 @Slf4j
 @RestController
-@RequestMapping("/featureElement")
+@RequestMapping("/feature-elements")
 public class FeatureElementController {
 
     @Autowired
@@ -33,7 +30,7 @@ public class FeatureElementController {
      * @param videoPath
      * @return
      */
-    @GetMapping("/queryByKey")
+    @GetMapping("/primary-key")
     public ApiResponse queryByKey(@RequestParam(required = true) String alarmId,@RequestParam(required = true) String imagePath,@RequestParam(required = true) String videoPath ) {
         if (alarmId == null || alarmId.isEmpty() || imagePath == null || imagePath.isEmpty() || videoPath == null || videoPath.isEmpty()) {
             return ApiResponse.fail(400, "参数alarmId、imagePath、videoPath不能为空");
@@ -45,8 +42,93 @@ public class FeatureElementController {
      * @desc 查询所有特征要素
      * @return
      */
-    @GetMapping("/queryAll")
+    @GetMapping("/all")
     public ApiResponse queryAll() {
         return ApiResponse.success(featureElementServiceImpl.queryAll());
+    }
+
+    /**
+     * @desc 根据特征要素主键id更新告警集匹配关系
+     * @param id
+     * @param collectionMatchStatus
+     * @return
+     */
+    @PutMapping("/match-status")
+    public ApiResponse updateCollectionMatchStatus(@RequestParam Integer id,
+                                                   @RequestParam Integer collectionMatchStatus) {
+        if (id == null || collectionMatchStatus == null) {
+            return ApiResponse.fail(400,"参数id、collectionMatchStatus不能为空");
+        }
+
+        int affectRows = featureElementServiceImpl.updateCollectionMatchStatus(id, collectionMatchStatus);
+
+        if (affectRows > 0) {
+            return ApiResponse.success("更新成功");
+        } else {
+            return ApiResponse.fail(401,"更新失败，未找到对应记录");
+        }
+    }
+
+    /**
+     * @desc 根据特征要素id更新人工检验标签
+     * @param id
+     * @param personCheckFlag
+     * @return
+     */
+    @PutMapping("/person-check-flag")
+    public ApiResponse updatePersonCheckFlag(@RequestParam Integer id, @RequestParam Integer personCheckFlag) {
+        if (id == null || personCheckFlag == null) {
+            return ApiResponse.fail(400,"参数id、personCheckFlag不能为空");
+        }
+
+        int affectRows = featureElementServiceImpl.updatePersonCheckFlag(id, personCheckFlag);
+
+        if (affectRows > 0) {
+            return ApiResponse.success("更新成功");
+        } else {
+            return ApiResponse.fail(401,"更新失败，未找到对应记录");
+        }
+    }
+
+    /**
+     * @desc 根据特征要素id更新关联是否准确字段
+     * @param id
+     * @param matchCheckFlag
+     * @return
+     */
+    @PutMapping("/match-check-flag")
+    public ApiResponse updateMatchCheckFlag(@RequestParam Integer id, @RequestParam Integer matchCheckFlag) {
+        if (id == null || matchCheckFlag == null) {
+            return ApiResponse.fail(400,"参数id、matchCheckFlag不能为空");
+        }
+
+        int affectRows = featureElementServiceImpl.updateMatchCheckFlag(id, matchCheckFlag);
+
+        if (affectRows > 0) {
+            return ApiResponse.success("更新成功");
+        } else {
+            return ApiResponse.fail(401,"更新失败，未找到对应记录");
+        }
+    }
+
+    /**
+     * @desc 根据特征要素id更新关联错误原因字段
+     * @param id
+     * @param matchCheckReason
+     * @return
+     */
+    @PutMapping("/match-check-reason")
+    public ApiResponse updateMatchCheckReason(@RequestParam Integer id, @RequestParam String matchCheckReason) {
+        if (id == null || matchCheckReason == null) {
+            return ApiResponse.fail(400,"参数id、matchCheckReason不能为空");
+        }
+
+        int affectRows = featureElementServiceImpl.updateMatchCheckReason(id, matchCheckReason);
+
+        if (affectRows > 0) {
+            return ApiResponse.success("更新成功");
+        } else {
+            return ApiResponse.fail(401,"更新失败，未找到对应记录");
+        }
     }
 }

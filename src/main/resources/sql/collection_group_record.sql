@@ -17,6 +17,7 @@ CREATE TABLE `collection_group_record` (
     `point2_y` int DEFAULT NULL COMMENT '提框坐标点位2y',
     `lead_compare_iou` int DEFAULT NULL COMMENT '与上条记录对比iou结果',
     `lead_compare_minute` int DEFAULT NULL COMMENT '与上条记录对比时长差距',
+    `group_type` int DEFAULT NULL COMMENT '告警组类型：0-无法判断告警组、1-正检告警组、2-误检告警组',
     `create_time` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '记录创建时间',
     `modify_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '记录修改时间',
     PRIMARY KEY (`id`)

@@ -6,6 +6,7 @@ import com.yuce.entity.AlarmCollection;
 import com.yuce.mapper.AlarmCollectionMapper;
 import com.yuce.service.AlarmCollectionService;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 /**
@@ -21,30 +22,20 @@ import org.springframework.stereotype.Service;
 @Slf4j
 public class AlarmCollectionServiceImpl extends ServiceImpl<AlarmCollectionMapper, AlarmCollection> implements AlarmCollectionService {
 
-    /**
-     * @desc 根拒设备id、告警集类型查看告警集是否存在
-     * @param deviceId
-     * @param collectionType
-     * @return
-     */
-    public boolean existsCollection(String deviceId, int collectionType) {
-        QueryWrapper<AlarmCollection> queryWrapper = new QueryWrapper<>();
-        queryWrapper.eq("device_id", deviceId);
-        queryWrapper.eq("collection_type", collectionType);
-        return this.count(queryWrapper) > 0;
-    }
+    @Autowired
+    private AlarmCollectionMapper alarmCollectionMapper;
 
     /**
-     * @desc 根拒设备id查看告警集是否存在
+     * @desc 根拒设备id查看其对应最新告警集
      * @param deviceId
-     * @param collectionType
      * @return
      */
-    public AlarmCollection getCollectionByKey(String deviceId, int collectionType) {
+    public AlarmCollection getLatestByDeviceId(String deviceId) {
         QueryWrapper<AlarmCollection> queryWrapper = new QueryWrapper<>();
         queryWrapper.eq("device_id", deviceId);
-        queryWrapper.eq("collection_type", collectionType);
-        return this.getOne(queryWrapper,false);
+        queryWrapper.orderByDesc("latest_alarm_time");
+        queryWrapper.last("limit 1");
+        return this.alarmCollectionMapper.selectOne(queryWrapper, false);
     }
 
     /**
@@ -54,7 +45,49 @@ public class AlarmCollectionServiceImpl extends ServiceImpl<AlarmCollectionMappe
      */
     public AlarmCollection getCollectionByTblId(long tblId) {
         QueryWrapper<AlarmCollection> queryWrapper = new QueryWrapper<>();
-        queryWrapper.apply("FIND_IN_SET({0}, related_id_list)", tblId);
+        queryWrapper.apply("FIND_IN_SET({0}, related_tbl_id_list)", tblId);
         return this.getOne(queryWrapper);
     }
+
+    /**
+     * @desc 根据alarmId查询归属告警集
+     * @param alarmId
+     * @return
+     */
+    public AlarmCollection getCollectionByAlarmId(String alarmId) {
+        QueryWrapper<AlarmCollection> queryWrapper = new QueryWrapper<>();
+        queryWrapper.apply("FIND_IN_SET({0}, related_alarm_id_list)", alarmId);
+        return this.getOne(queryWrapper);
+    }
+
+    /**
+     * @desc 根拒告警集id查询告警集详情
+     * @param collectionId
+     * @return
+     */
+    public AlarmCollection getCollectionByCollectionId(String collectionId) {
+        QueryWrapper<AlarmCollection> queryWrapper = new QueryWrapper<>();
+        queryWrapper.eq("collection_id", collectionId);
+        return this.getOne(queryWrapper,false);
+    }
+
+    /**
+     * @desc 根拒告警集id更新人工检验标签
+     * @param collectionId
+     * @return
+     */
+    public int updatePersonCheckFlag(String collectionId, Integer personCheckFlag) {
+       return alarmCollectionMapper.updatePersonCheckFlag(collectionId,personCheckFlag);
+    }
+
+    /**
+     * @desc 根拒告警集id更新人工检验标签
+     * @param collectionId
+     * @return
+     */
+    public int updatePersonCheckReason(String collectionId, String personCheckReason) {
+        return alarmCollectionMapper.updatePersonCheckReason(collectionId,personCheckReason);
+    }
+
+
 }

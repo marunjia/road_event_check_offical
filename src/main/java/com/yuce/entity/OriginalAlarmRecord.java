@@ -185,9 +185,6 @@ public class OriginalAlarmRecord implements Serializable {
     @TableField("modify_time_sys")
     private String modifyTimeSys;
 
-    @TableField("consume_tag")
-    private Integer consumeTag;
-
     @TableField(value = "db_create_time", fill = FieldFill.INSERT)
     private LocalDateTime dbCreateTime;
 

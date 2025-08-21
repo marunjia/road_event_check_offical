@@ -15,7 +15,7 @@ CREATE TABLE `feature_element_record` (
   `disposal_advice` int(11) DEFAULT NULL COMMENT '处置建议：0-无法判断、1-疑似误报、2-尽快确认、3-无需处理',
   `advice_reason` varchar(255) DEFAULT NULL COMMENT '处置建议依据',
   `alarm_element` varchar(255) DEFAULT NULL COMMENT '告警物体',
-  `alarmElement_range` varchar(255) DEFAULT NULL COMMENT '告警物附近物体',
+  `alarm_element_range` varchar(255) DEFAULT NULL COMMENT '告警物附近物体',
   `create_time` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '记录创建时间',
   `modify_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '记录修改时间',
   PRIMARY KEY (`id`),

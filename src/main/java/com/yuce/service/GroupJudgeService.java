@@ -15,7 +15,7 @@ import org.springframework.stereotype.Service;
  * @Version 1.0
  */
 
-public class GroupJudgeService {
+public interface GroupJudgeService {
 
 
 }

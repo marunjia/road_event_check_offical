@@ -26,7 +26,7 @@ CREATE TABLE `kafka_original_alarm_record` (
     `direction_des` varchar(255) DEFAULT NULL COMMENT '方向描述',
     `source_event_id` varchar(64) DEFAULT NULL COMMENT '源事件ID',
     `jam_speed` varchar(64) DEFAULT NULL COMMENT '拥堵速度',
-    `long_time` varchar(64) DEFAULT NULL COMMENT '持续时间',
+    `long_time` varchar(64) DEFAULT NULL COMMENT '持续时f间',
     `jam_dist` varchar(64) DEFAULT NULL COMMENT '拥堵距离',
     `weather` varchar(64) DEFAULT NULL COMMENT '天气',
     `deal_flag` varchar(64) DEFAULT NULL COMMENT '处理标志',

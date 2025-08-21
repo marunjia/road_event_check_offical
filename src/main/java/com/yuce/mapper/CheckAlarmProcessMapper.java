@@ -5,7 +5,6 @@ import com.yuce.entity.CheckAlarmProcess;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
-
 import java.util.List;
 import java.util.Map;
 
@@ -31,7 +30,7 @@ public interface CheckAlarmProcessMapper extends BaseMapper<CheckAlarmProcess> {
                                             @Param("imageId") String imageId);
 
     //根据告警记录id、图片路径、视频路径、type的联合主键查询对应记录明细
-    @Select("SELECT * FROM algorithm_check_process WHERE alarm_id = #{alarmId} AND image_path = #{imagePath} AND video_path = #{videoPath} AND type = #{type}")
+    @Select("SELECT * FROM algorithm_check_process WHERE alarm_id = #{alarmId} AND image_path = #{imagePath} AND video_path = #{videoPath} AND type = #{type} ORDER BY iou desc, score desc")
     List<CheckAlarmProcess> getListByKeyAndType(@Param("alarmId") String alarmId,
                                                 @Param("imagePath") String imagePath,
                                                 @Param("videoPath") String videoPath,
@@ -72,7 +71,8 @@ public interface CheckAlarmProcessMapper extends BaseMapper<CheckAlarmProcess> {
             "AND image_path = #{imagePath} \n" +
             "AND video_path = #{videoPath} \n" +
             "AND image_id = #{imageId} \n" +
-            "AND id != #{id}\n" +
+            "AND id != #{id} \n" +
+            "AND score >= 0.35 \n" +
             ") t group by t.name,t.level\n" +
             "order by t.level \n" +
             "limit 4;")

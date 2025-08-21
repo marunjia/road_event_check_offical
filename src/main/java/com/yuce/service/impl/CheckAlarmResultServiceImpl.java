@@ -41,6 +41,7 @@ public class CheckAlarmResultServiceImpl extends ServiceImpl<CheckAlarmResultMap
     @Autowired
     private CheckAlarmProcessMapper checkAlarmProcessMapper;
 
+
     @PostConstruct
     public void init() {
         frameCount = videoProperties.getFrameCount();
@@ -88,7 +89,12 @@ public class CheckAlarmResultServiceImpl extends ServiceImpl<CheckAlarmResultMap
         int rightCheckNum = 0;
         for (int i = 0; i < frameCount; i++) {
             String imageId = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd")) + "_" + record.getId() + "_" + i + "_" + record.getTblId();
-            double iou = checkAlarmProcessMapper.getIouTop1ByKeyAndPic(alarmId, imagePath, videoPath, imageId).getIou();
+            CheckAlarmProcess checkAlarmProcess = checkAlarmProcessMapper.getIouTop1ByKeyAndPic(alarmId, imagePath, videoPath, imageId);
+            double iou = 0;
+            if(checkAlarmProcess != null) {
+                iou = checkAlarmProcess.getIou();
+            }
+
             if (iou >= iouConfig) {
                 log.info("正检判定：alarmId->{}, imagePath->{}, videoPath->{}, imageId->{}, iou->{}, rightCheckNum->{}", alarmId, imagePath, videoPath, imageId, iou, rightCheckNum);
                 rightCheckNum++;
@@ -96,6 +102,7 @@ public class CheckAlarmResultServiceImpl extends ServiceImpl<CheckAlarmResultMap
                 log.info("误检判定：alarmId->{}, imagePath->{}, videoPath->{}, imageId->{}, iou->{}, rightCheckNum->{}", alarmId, imagePath, videoPath, imageId, iou, rightCheckNum);
             }
         }
+
         int checkFlag = 0;
         if (rightCheckNum >= rightCheckNumConfig) {
             checkFlag = 1;
@@ -103,11 +110,18 @@ public class CheckAlarmResultServiceImpl extends ServiceImpl<CheckAlarmResultMap
             checkFlag = 2;
         }
 
+        String checkName = null;
+        CheckAlarmProcess checkAlarmProcess = checkAlarmProcessMapper.getIouTop1ByKey(alarmId,imagePath,videoPath);
+        if(checkAlarmProcess != null){
+            checkName = checkAlarmProcess.getName();
+        }
+
         CheckAlarmResult checkAlarmResult = new CheckAlarmResult();
         checkAlarmResult.setAlarmId(alarmId);
         checkAlarmResult.setCheckFlag(checkFlag);
         checkAlarmResult.setImagePath(imagePath);
         checkAlarmResult.setVideoPath(videoPath);
+        checkAlarmResult.setCheckName(checkName);
         checkAlarmResult.setCheckTime(LocalDateTime.now());
 
         CheckAlarmResult existing = getResultByKey(alarmId, imagePath, videoPath);
@@ -140,8 +154,11 @@ public class CheckAlarmResultServiceImpl extends ServiceImpl<CheckAlarmResultMap
         //查询算法检验结果列表
         List<CheckAlarmProcess> list = checkAlarmProcessMapper.getListByKeyAndType(alarmId, imagePath, videoPath, type);
         int checkFlag = 0;
+
+        String checkName = null;
         if (list.size() > 0) {
             checkFlag = 1;
+            checkName = list.get(0).getName();//匹配度最高的物体名称
         } else {
             checkFlag = 2;
         }
@@ -150,6 +167,7 @@ public class CheckAlarmResultServiceImpl extends ServiceImpl<CheckAlarmResultMap
         if (existing != null) {
             // 更新已有记录
             existing.setCheckFlag(checkFlag);
+            existing.setCheckName(checkName);
             existing.setUpdateTime(LocalDateTime.now());
             existing.setCheckTime(LocalDateTime.now());
             checkAlarmResultMapper.updateById(existing);
@@ -160,20 +178,19 @@ public class CheckAlarmResultServiceImpl extends ServiceImpl<CheckAlarmResultMap
             checkAlarmResult.setImagePath(imagePath);
             checkAlarmResult.setVideoPath(videoPath);
             checkAlarmResult.setCheckFlag(checkFlag);
+            checkAlarmResult.setCheckName(checkName);
             checkAlarmResult.setCheckTime(LocalDateTime.now());
-            checkAlarmResult.setUpdateTime(LocalDateTime.now());
             checkAlarmResult.setCreateTime(LocalDateTime.now());
+            checkAlarmResult.setUpdateTime(LocalDateTime.now());
             checkAlarmResultMapper.insert(checkAlarmResult);
         }
     }
 
     /**
-     * @param checkAlarmResult
-     * @desc 插入新纪录
+     * @param id
+     * @desc 获取最近50条误检数据的设备id
      */
-    public void insert(CheckAlarmResult checkAlarmResult) {
-        checkAlarmResult.setCreateTime(LocalDateTime.now());
-        checkAlarmResult.setUpdateTime(LocalDateTime.now());
-        checkAlarmResultMapper.insert(checkAlarmResult);
+    public List<String> getRecentFalseCheckList(Long id) {
+        return checkAlarmResultMapper.getRecentFalseCheckList(id);
     }
 }

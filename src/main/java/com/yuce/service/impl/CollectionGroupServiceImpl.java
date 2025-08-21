@@ -6,9 +6,12 @@ import com.yuce.entity.*;
 import com.yuce.mapper.CollectionGroupMapper;
 import com.yuce.service.CollectionGroupService;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.util.Assert;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * @ClassName CollectionGroupServiceImpl
@@ -22,6 +25,9 @@ import java.util.List;
 @Service
 @Slf4j
 public class CollectionGroupServiceImpl extends ServiceImpl<CollectionGroupMapper, CollectionGroupRecord> implements CollectionGroupService {
+
+    @Autowired
+    private CollectionGroupMapper collectionGroupMapper;
 
     /**
      * @desc 根据key值查询告警记录归属告警组
@@ -39,52 +45,39 @@ public class CollectionGroupServiceImpl extends ServiceImpl<CollectionGroupMappe
     }
 
     /**
-     * @desc 新增告警组记录
-     * @param collectionGroupRecord
+     * @desc 根据collectionId和groupId查询告警组列表
+     * @param groupId
      * @return
      */
-    public boolean insertGroup(CollectionGroupRecord collectionGroupRecord) {
-        return this.save(collectionGroupRecord);
+    public List<Map<String, Object>> queryByCollectionIdAndGroupId(String collectionId,String groupId) {
+        return collectionGroupMapper.queryByCollectionIdAndGroupId(collectionId, groupId);
     }
 
     /**
-     * @desc 根据collectionId查询告警组
+     * @desc 根据collectionId和groupId查询告警组列表
+     * @param groupId
+     * @return
+     */
+    public CollectionGroupRecord queryTop1ByCollectionIdAndGroupId(String collectionId,String groupId) {
+        QueryWrapper<CollectionGroupRecord> queryWrapper = new QueryWrapper<>();
+        queryWrapper.eq("collection_id", collectionId);
+        queryWrapper.eq("group_id", groupId);
+        queryWrapper.orderByDesc("alarm_time");
+        queryWrapper.last("limit 1");
+        return this.getOne(queryWrapper);
+    }
+
+    /**
+     * @desc 根据告警集id查询告警组分布情况
      * @param collectionId
      * @return
      */
-    public List<CollectionGroupRecord> queryByCollectionId(String collectionId) {
-        QueryWrapper<CollectionGroupRecord> queryWrapper = new QueryWrapper<>();
-        queryWrapper.eq("collection_id", collectionId);
-        queryWrapper.orderByDesc("create_time");
-        return this.list(queryWrapper);
+    public List<Map<String, Object>> getIndexByCollectionId(String collectionId) {
+        // 参数校验：避免无效查询
+        Assert.hasText(collectionId, "告警集ID（collectionId）不能为空");
+        List<Map<String, Object>> statMapList = collectionGroupMapper.getIndexByCollectionId(collectionId);
+        return statMapList;
     }
-
-    /**
-     * @desc 根据groupId查询告警组
-     * @param groupId
-     * @return
-     */
-    public List<CollectionGroupRecord> queryByGroupId(String groupId) {
-        QueryWrapper<CollectionGroupRecord> queryWrapper = new QueryWrapper<>();
-        queryWrapper.eq("group_id", groupId);
-        queryWrapper.orderByDesc("create_time");
-        return this.list(queryWrapper);
-    }
-
-
-    /**
-     * @desc 根据collectionId和groupId查询告警组
-     * @param groupId
-     * @return
-     */
-    public List<CollectionGroupRecord> queryByCollectionIdAndGroupId(String collectionId,String groupId) {
-        QueryWrapper<CollectionGroupRecord> queryWrapper = new QueryWrapper<>();
-        queryWrapper.eq("collection_id", collectionId);
-        queryWrapper.eq("group_id", groupId);
-        queryWrapper.orderByDesc("create_time");
-        return this.list(queryWrapper);
-    }
-
 
 
 

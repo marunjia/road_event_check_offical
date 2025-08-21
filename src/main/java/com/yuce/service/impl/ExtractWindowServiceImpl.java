@@ -2,11 +2,8 @@ package com.yuce.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
-import com.yuce.entity.ExtractImageRecord;
 import com.yuce.entity.ExtractWindowRecord;
-import com.yuce.mapper.ExtractImageMapper;
 import com.yuce.mapper.ExtractWindowMapper;
-import com.yuce.service.ExtractImageService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
@@ -21,7 +18,7 @@ import org.springframework.stereotype.Service;
 
 @Service
 @Slf4j
-public class ExtractWindowServiceImpl extends ServiceImpl<ExtractWindowMapper, ExtractWindowRecord> implements ExtractImageService {
+public class ExtractWindowServiceImpl extends ServiceImpl<ExtractWindowMapper, ExtractWindowRecord> {
 
     /**
      * @desc 查询告警记录图片对应坐标框
@@ -63,3 +60,4 @@ public class ExtractWindowServiceImpl extends ServiceImpl<ExtractWindowMapper, E
         return this.save(extractWindowRecord);
     }
 }
+

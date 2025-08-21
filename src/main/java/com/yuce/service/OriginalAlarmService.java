@@ -19,5 +19,5 @@ public interface OriginalAlarmService extends IService<OriginalAlarmRecord> {
     // 可以定义一些业务逻辑的方法，例如自定义的保存方法
     void saveIfNotExists(OriginalAlarmRecord record);
 
-    IPage<QueryResultCheckRecord> selectWithOriginaleField(String alarmId, String startDate, String endDate, String deviceName ,String roadId, String direction, String eventType, Integer dealFlag, Integer checkFlag, Integer disposalAdvice, String adviceReason, int pageNo, int pageSize);
+    IPage<QueryResultCheckRecord> selectWithOriginaleField(String alarmId, String startDate, String endDate, String deviceName ,String roadId, String direction, String eventType, Integer dealFlag, Integer checkFlag, Integer disposalAdvice, String adviceReason, String deviceId, int pageNo, int pageSize);
 }

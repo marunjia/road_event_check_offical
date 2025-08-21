@@ -18,10 +18,10 @@ public class KafkaUtil {
     private final AtomicInteger consumerCounter = new AtomicInteger(0);
 
     private static final long COMMIT_INTERVAL_MS = 1000;
-    private volatile String groupId = "concurrent-version-video-alarm-041";
+    private volatile String groupId = "concurrent-version-video-alarm-126";
     private volatile String topic = "DATA_COLLECT_VIDEO_ALARM_DETAIL";
     private volatile String bootstrapServers = "12.1.150.178:9082,12.1.150.179:9082,12.1.150.180:9082,12.1.150.91:9082,12.1.150.92:9082";
-    private volatile Integer maxPollRecords = 10;
+    private volatile Integer maxPollRecords = 60;
 
     /**
      * @desc 启动所有consumers
@@ -138,6 +138,10 @@ public class KafkaUtil {
         props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, "org.apache.kafka.common.serialization.StringDeserializer");
         props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, "org.apache.kafka.common.serialization.StringDeserializer");
         props.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, maxPollRecords);
+        props.put(ConsumerConfig.SESSION_TIMEOUT_MS_CONFIG, 30000);     // 30s，避免心跳超时
+        props.put(ConsumerConfig.HEARTBEAT_INTERVAL_MS_CONFIG, 10000);  // 10s，建议为 session 的 1/3
+        props.put(ConsumerConfig.MAX_POLL_INTERVAL_MS_CONFIG, 300000);  // 5min，防止处理太久被踢出组
+        props.put(ConsumerConfig.REQUEST_TIMEOUT_MS_CONFIG, 40000);     // 保证比 session.timeout.ms 更大
         return props;
     }
 }

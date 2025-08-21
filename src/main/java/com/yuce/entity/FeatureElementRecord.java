@@ -1,8 +1,6 @@
 package com.yuce.entity;
 
-import com.baomidou.mybatisplus.annotation.FieldFill;
-import com.baomidou.mybatisplus.annotation.TableField;
-import com.baomidou.mybatisplus.annotation.TableName;
+import com.baomidou.mybatisplus.annotation.*;
 import lombok.Data;
 import java.time.LocalDateTime;
 
@@ -19,7 +17,8 @@ import java.time.LocalDateTime;
 @TableName("feature_element_record")
 public class FeatureElementRecord {
 
-    private Long id; // 主键ID
+    @TableId(type = IdType.AUTO)
+    private Integer id; // 主键ID
 
     private String alarmId; // 告警ID，关联外部告警表
 
@@ -41,7 +40,7 @@ public class FeatureElementRecord {
 
     private String rescueForce; // 施救力量，JSON结构，例如：{"工程车":1,"施工人":2}
 
-    private String congestionStatus; // 拥堵情况，例如：无拥堵、轻度拥堵、严重拥堵
+    private Integer congestionStatus; // 0:未发生拥堵，1:发生拥堵
 
     private String dangerElement; // 危险要素，例如：冒烟、起火、无
 
@@ -52,6 +51,14 @@ public class FeatureElementRecord {
     private String alarmElement; // 告警物体
 
     private String alarmElementRange; // 告警物附近物体
+
+    private Integer collectionMatchStatus; //告警集关联状态：1关联正确，2关联错误
+
+    private Integer personCheckFlag; // 人工检验标签:1未核查，2确认事件，3无需处理，4误报
+
+    private Integer matchCheckFlag; // 关联是否正确：0否、1是
+
+    private String matchCheckReason; // 关联错误原因
 
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createTime;

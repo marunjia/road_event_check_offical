@@ -2,266 +2,335 @@ package com.yuce.algorithm;
 
 import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
-import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.yuce.entity.*;
-import com.yuce.mapper.CheckAlarmResultMapper;
-import com.yuce.mapper.ExtractWindowMapper;
-import com.yuce.service.ExtractWindowService;
-import com.yuce.service.impl.CheckAlarmProcessServiceImpl;
-import com.yuce.service.impl.CheckAlarmResultServiceImpl;
+import com.yuce.entity.ExtractWindowRecord;
+import com.yuce.entity.OriginalAlarmRecord;
 import com.yuce.service.impl.ExtractWindowServiceImpl;
-import com.yuce.service.impl.FrameImageServiceImpl;
 import lombok.extern.slf4j.Slf4j;
 import okhttp3.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import javax.annotation.PostConstruct;
 import java.io.IOException;
 import java.time.LocalDateTime;
 import java.util.*;
+import java.util.concurrent.TimeUnit;
 
 /**
- * @ClassName ExtractWindowServiceImpl
- * @Description 提框算法
- * @Author jacksparrow
- * @Email 18310124408@163.com
- * @Date 2025/5/15 11:02
- * @Version 1.0
+ * 提框算法服务：负责调用提框接口、结果解析及记录持久化
  */
-
 @Service
 @Slf4j
-public class ExtractWindowAlgorithm extends ServiceImpl<ExtractWindowMapper, ExtractWindowRecord> implements ExtractWindowService {
+public class ExtractWindowAlgorithm{
 
-    @Autowired
-    private FrameImageServiceImpl frameImageServiceImpl;
-
-    @Autowired
-    private CheckAlarmResultMapper checkAlarmResultMapper;
-
-    @Autowired
-    private CheckAlarmProcessServiceImpl checkAlarmProcessServiceImpl;
-
-    @Autowired
-    private ExtractWindowServiceImpl extractWindowServiceImpl;
-
-    @Autowired
-    private GeneralAlgorithm generalAlgorithm;
-
-    //定义接口请求访问地址
+    // ------------------------------ 常量定义 ------------------------------
     private static final String EXTRACT_POINT_URL = "http://12.1.97.206:7870/extract";
+    private static final int HTTP_CONNECT_TIMEOUT = 10; // 连接超时（秒）
+    private static final int HTTP_READ_TIMEOUT = 15;    // 读取超时（秒）
+    private static final String DEFAULT_BBOX_COLOR = "red";
+    private static final String DEFAULT_BBOX_TYPE = "normal";
+    private static final MediaType JSON_MEDIA_TYPE = MediaType.get("application/json; charset=utf-8");
+    private static final int DEFAULT_COORD = -999; // 默认坐标（表示无数据）
 
-    //定义客户端对象
-    private static final OkHttpClient client = new OkHttpClient();
-    private static final ObjectMapper mapper = new ObjectMapper();
 
-    /**
-     * 调用提框
-     * @param record
-     * @return boolean
-     */
-    @Override
-    public boolean extractWindow(OriginalAlarmRecord record) {
+    // ------------------------------ 成员变量 ------------------------------
+    private OkHttpClient okHttpClient;
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
-        Long id = record.getTblId();
+    @Autowired
+    private ExtractWindowServiceImpl extractWindowService;
+
+
+    // ------------------------------ 初始化 ------------------------------
+    @PostConstruct
+    public void init() {
+        // 初始化OkHttpClient（单例+连接池，提升性能）
+        this.okHttpClient = new OkHttpClient.Builder()
+                .connectTimeout(HTTP_CONNECT_TIMEOUT, TimeUnit.SECONDS)
+                .readTimeout(HTTP_READ_TIMEOUT, TimeUnit.SECONDS)
+                .connectionPool(new ConnectionPool(5, 30, TimeUnit.SECONDS)) // 复用连接
+                .retryOnConnectionFailure(true) // 连接失败自动重试
+                .build();
+        log.info("提框服务初始化完成 | 接口地址:{} | 连接超时:{}s | 读取超时:{}s",
+                EXTRACT_POINT_URL, HTTP_CONNECT_TIMEOUT, HTTP_READ_TIMEOUT);
+    }
+
+
+    // ------------------------------ 核心业务方法 ------------------------------
+    public void extractWindow(OriginalAlarmRecord record) throws IOException {
+        // 提取核心字段（确保日志可追踪）
+        Long tblId = record.getTblId();
         String alarmId = record.getId();
         String imagePath = record.getImagePath();
         String videoPath = record.getVideoPath();
+        log.info("开始提框处理 | alarmId:{} | imagePath:{} | videoPath:{} | tblId:{}",
+                alarmId, imagePath, videoPath, tblId);
 
-        if(extractWindowServiceImpl.existsByKey(alarmId,imagePath,videoPath)) {
-            log.info("告警记录已提框：id->{}, alarmId->{}, imagePath->{}, videoPath->{}", id, alarmId, imagePath, videoPath);
-            return true;
+        // 入参校验（提前阻断无效请求）
+        validateInput(record, alarmId, imagePath, videoPath);
+
+        // 重复提框校验（避免重复调用）
+        if (extractWindowService.existsByKey(alarmId, imagePath, videoPath)) {
+            log.info("提框记录已存在，跳过处理 | alarmId:{} | imagePath:{} | videoPath:{} | tblId:{}",
+                    alarmId, imagePath, videoPath, tblId);
+            return;
         }
 
-        String jsonBody;
-        try {
-            jsonBody = mapper.writeValueAsString(buildRequestData(record));
-        } catch (IOException e) {
-            log.error("请求体序列化失败", e);
-            return false;
+        // 构建请求参数
+        Map<String, Object> requestData = buildRequestData(record);
+        String requestBodyStr = objectMapper.writeValueAsString(requestData);
+        log.debug("提框请求参数 | alarmId:{} | 请求体:{}", alarmId, requestBodyStr);
+
+        // 调用提框接口（自动关闭响应资源）
+        String responseBodyStr;
+        try (Response response = callExtractApi(requestBodyStr, alarmId, imagePath, videoPath)) {
+            if (!response.isSuccessful()) {
+                throw new IOException(String.format(
+                        "提框接口返回失败 | alarmId:%s | imagePath:%s | videoPath:%s | 状态码:%d",
+                        alarmId, imagePath, videoPath, response.code()));
+            }
+            ResponseBody body = response.body();
+            responseBodyStr = (body != null) ? body.string() : null;
         }
 
-        // 构造请求
-        RequestBody body = RequestBody.create(jsonBody, MediaType.parse("application/json"));
-        Request request = new Request.Builder().url(EXTRACT_POINT_URL).post(body).build();
+        // 响应体校验
+        if (responseBodyStr == null || responseBodyStr.isEmpty()) {
+            throw new IOException(String.format(
+                    "提框接口返回空响应 | alarmId:%s | imagePath:%s | videoPath:%s",
+                    alarmId, imagePath, videoPath));
+        }
+        log.info("提框接口调用成功 | alarmId:{} | imagePath:{} | videoPath:{} | 响应体:{}",
+                alarmId, imagePath, videoPath, responseBodyStr);
 
-        // 执行同步请求
-        try (Response response = client.newCall(request).execute()) {
-            if (response == null || !response.isSuccessful()) {
-                log.error("提框服务接口返回非成功状态: code={}, alarm_id->{}, image_path->{}, video_path->{}", response != null ? response.code() : "null",alarmId, imagePath, videoPath);
-                return false;
-            }
+        // 解析响应并持久化
+        ExtractWindowRecord windowRecord = parseResponse(responseBodyStr, record, alarmId, imagePath, videoPath);
+        extractWindowService.insertWindow(windowRecord);
+        log.info("提框处理完成 | alarmId:{} | imagePath:{} | videoPath:{} | 提框状态:{}",
+                alarmId, imagePath, videoPath, windowRecord.getStatus());
+    }
 
-            // 关键：只读取一次响应体，并确保日志中不重复调用
-            String responseBody = response.body() != null ? response.body().string() : null;
-            log.info("调用提框服务:alarmId -> {}, 请求体内容 -> {}, 返回体 -> {}", alarmId, jsonBody, responseBody);
 
-            if (responseBody == null || responseBody.isEmpty()) {
-                return false;
-            }
-
-            // 解析为 JSON 数组
-            JSONObject resutlJsonObject = JSONArray.parseArray(responseBody).getJSONObject(0);
-            String imageId = resutlJsonObject.getString("image_id");
-            int status = resutlJsonObject.getIntValue("status");
-            String data = resutlJsonObject.getString("data");
-
-            ExtractWindowRecord extractPointRecord = new ExtractWindowRecord();
-            extractPointRecord.setAlarmId(record.getId());
-            extractPointRecord.setImagePath(record.getImagePath());
-            extractPointRecord.setVideoPath(record.getVideoPath());
-            extractPointRecord.setImageId(imageId);
-            extractPointRecord.setStatus(status);
-            extractPointRecord.setReceivedTime(LocalDateTime.now());
-            extractPointRecord.setCreateTime(LocalDateTime.now());
-            extractPointRecord.setModifyTime(LocalDateTime.now());
-
-            JSONArray jsonArray = JSONArray.parseArray(data);
-            if(jsonArray.size() == 0){
-                extractPointRecord.setPoint1X(-999);
-                extractPointRecord.setPoint1Y(-999);
-                extractPointRecord.setPoint2X(-999);
-                extractPointRecord.setPoint2Y(-999);
-            }else{
-                JSONObject jsonObject = jsonArray.getJSONObject(0);
-                JSONArray pointsJsonArray = JSONArray.parseArray(jsonObject.getString("points"));
-                JSONObject point1 = pointsJsonArray.getJSONObject(0);
-                JSONObject point2 = pointsJsonArray.getJSONObject(1);
-                extractPointRecord.setPoint1X(point1.getIntValue("x"));
-                extractPointRecord.setPoint1Y(point1.getIntValue("y"));
-                extractPointRecord.setPoint2X(point2.getIntValue("x"));
-                extractPointRecord.setPoint2Y(point2.getIntValue("y"));
-            }
-            extractWindowServiceImpl.insertWindow(extractPointRecord);
-            return true;
-        } catch (IOException e) {
-            log.error("算法请求异常", e);
-            return false;
+    // ------------------------------ 私有工具方法 ------------------------------
+    /**
+     * 校验入参合法性
+     */
+    private void validateInput(OriginalAlarmRecord record, String alarmId, String imagePath, String videoPath) {
+        if (record == null) {
+            throw new IllegalArgumentException("原始告警记录不能为空");
+        }
+        if (isEmpty(alarmId)) {
+            throw new IllegalArgumentException(String.format(
+                    "alarmId不能为空 | imagePath:%s | videoPath:%s", imagePath, videoPath));
+        }
+        if (isEmpty(imagePath)) {
+            throw new IllegalArgumentException(String.format(
+                    "imagePath不能为空 | alarmId:%s | videoPath:%s", alarmId, videoPath));
+        }
+        if (isEmpty(videoPath)) {
+            throw new IllegalArgumentException(String.format(
+                    "videoPath不能为空 | alarmId:%s | imagePath:%s", alarmId, imagePath));
+        }
+        if (isEmpty(record.getDeviceId())) {
+            throw new IllegalArgumentException(String.format(
+                    "deviceId不能为空 | alarmId:%s | imagePath:%s | videoPath:%s",
+                    alarmId, imagePath, videoPath));
         }
     }
 
     /**
-     * 构造请求体 Map 数据
-     * @param record
-     * @return 请求体 Map
+     * 调用提框接口
      */
-    public Map<String, Object> buildRequestData(OriginalAlarmRecord record) {
-        Map<String, Object> root = new HashMap<>();
+    private Response callExtractApi(String requestBodyStr, String alarmId, String imagePath, String videoPath) throws IOException {
+        try {
+            Request request = new Request.Builder()
+                    .url(EXTRACT_POINT_URL)
+                    .post(RequestBody.create(requestBodyStr, JSON_MEDIA_TYPE))
+                    .addHeader("Connection", "keep-alive")
+                    .build();
+            log.debug("发起提框请求 | alarmId:{} | 接口地址:{}", alarmId, EXTRACT_POINT_URL);
+            return okHttpClient.newCall(request).execute();
+        } catch (IOException e) {
+            log.error("提框接口调用异常 | alarmId:{} | imagePath:{} | videoPath:{}",
+                    alarmId, imagePath, videoPath, e);
+            throw e;
+        }
+    }
 
-        root.put("alarm_type", Collections.singletonList("overlay_image_extract_bbox"));// alarm_type
+    /**
+     * 构建请求参数
+     */
+    /**
+     * 构建请求参数
+     */
+    private Map<String, Object> buildRequestData(OriginalAlarmRecord record) {
+        Map<String, Object> root = new HashMap<>(2);
+        root.put("alarm_type", Collections.singletonList("overlay_image_extract_bbox"));
 
-        List<List<Map<String, Object>>> messages = new ArrayList<>();// 外层 messages
-
-        List<Map<String, Object>> messageGroup = new ArrayList<>();// 中间层 messageGroup（只有一个分组）
-
-        Map<String, Object> message = new HashMap<>();// 构造 message
+        // 构建messages结构
+        List<List<Map<String, Object>>> messages = new ArrayList<>(1);
+        List<Map<String, Object>> messageGroup = new ArrayList<>(1);
+        Map<String, Object> message = new HashMap<>(2);
         message.put("role", "user");
 
-        List<Map<String, Object>> content = new ArrayList<>();
+        // 构建content列表
+        List<Map<String, Object>> content = new ArrayList<>(7);
+        content.add(buildContentItem("device_id", "device_id", record.getDeviceId()));
+        content.add(buildContentItem("image_id", "image_id", generateUniqueId(record.getDeviceId(), "image")));
+        content.add(buildContentItem("video_id", "video_id", generateUniqueId(record.getDeviceId(), "video")));
+        content.add(buildContentItem("bbox_color", "bbox_color", getExtractColor(record)));
+        content.add(buildContentItem("bbox_type", "bbox_type", getExtractWindowType(record)));
 
-        // device_id
-        Map<String, Object> deviceIdMap = new HashMap<>();
-        deviceIdMap.put("type", "device_id");
-        deviceIdMap.put("device_id", record.getDeviceId());
-        content.add(deviceIdMap);
-
-        Map<String, Object> imageIdMap = new HashMap<>();
-        imageIdMap.put("type", "image_id");
-        imageIdMap.put("image_id", record.getDeviceId() + "_image_" + System.currentTimeMillis());
-        content.add(imageIdMap);
-
-        Map<String, Object> videoIdMap = new HashMap<>();
-        videoIdMap.put("type", "video_id");
-        videoIdMap.put("video_id", record.getDeviceId() + "_video_" + System.currentTimeMillis());
-        content.add(videoIdMap);
-
-        Map<String, Object> colorMap = new HashMap<>();
-        colorMap.put("type", "bbox_color");
-        colorMap.put("bbox_color", getExtractColor(record));
-        content.add(colorMap);
-
-//        Map<String, Object> typeMap = new HashMap<>();
-//        colorMap.put("type", "bbox_type");
-//        colorMap.put("bbox_type", getExtractWindowType(record));
-//        content.add(typeMap);
-
+        // 修复：Java 8 用 HashMap 替代 Map.of()
         Map<String, Object> imageUrlMap = new HashMap<>();
-        imageUrlMap.put("type", "image_url");
-        Map<String, Object> imageUrlValueMap = new HashMap<>();
-        imageUrlValueMap.put("url", record.getImagePath());
-        imageUrlMap.put("image_url", imageUrlValueMap);
-        content.add(imageUrlMap);
+        imageUrlMap.put("url", record.getImagePath());
+        content.add(buildContentItem("image_url", "image_url", imageUrlMap));
 
         Map<String, Object> videoUrlMap = new HashMap<>();
-        videoUrlMap.put("type", "video_url");
-        Map<String, Object> videoUrlValueMap = new HashMap<>();
-        videoUrlValueMap.put("url", record.getVideoPath());
-        videoUrlMap.put("video_url", videoUrlValueMap);
-        content.add(videoUrlMap);
+        videoUrlMap.put("url", record.getVideoPath());
+        content.add(buildContentItem("video_url", "video_url", videoUrlMap));
 
         message.put("content", content);
         messageGroup.add(message);
         messages.add(messageGroup);
         root.put("messages", messages);
+
         return root;
     }
 
     /**
-     * @desc 获取抽框坐标入参颜色字段
-     *          company == null ,返回red;
-     *          company == "闪马|彗精髓", 返回red
-     *          company == “高通”, 返回blue
-     *          其他场景返回red
-     *
-     * @param record
-     * @return
+     * 生成唯一ID（设备ID+类型+时间戳）
      */
-    public String getExtractColor(OriginalAlarmRecord record) {
-        String color = null;
-        String company = record.getCompany();
-        String imageId = record.getImagePath();
-        if (company == null || company.isEmpty()) {
-            color = "red";
-        }else if (company.equals("闪马") || company.equals("彗景")) {
-            color = "red";
-        }else if (company.equals("高瞳")) {
-            if (imageId.contains("{")) {
-                color = "red";
-            }else {
-                color = "blue";
-            }
-        }else {
-            color = "red";
-        }
-        return color;
+    private String generateUniqueId(String deviceId, String type) {
+        return deviceId + "_" + type + "_" + System.currentTimeMillis();
     }
 
     /**
-     * @desc 获取抽框坐标框类型字段
-     *       company == "之江智能"
-     *           eventType == "抛洒物"，返回zhijiang_paosawu
-     *           eventType != "抛洒物"，返回zhijiang
-     *       company == “高瞳”, 返回gaotong
-     *       其他场景返回normal
-     * @param record
-     * @return
+     * 构建content单项
      */
-    public static String getExtractWindowType(OriginalAlarmRecord record) {
-        String bboxType = "normal";
+    private Map<String, Object> buildContentItem(String type, String key, Object value) {
+        Map<String, Object> item = new HashMap<>(2);
+        item.put("type", type);
+        item.put(key, value);
+        return item;
+    }
+
+    /**
+     * 获取提框颜色
+     */
+    public String getExtractColor(OriginalAlarmRecord record) {
         String company = record.getCompany();
-        String eventType = record.getEventType();
+        String imagePath = record.getImagePath();
 
-        if(company.equals("高瞳")) {
-            bboxType = "gaotong";
+        // 高瞳且图片路径不含{时返回blue，其他场景返回red
+        if ("高瞳".equals(company) && imagePath != null && !imagePath.contains("{")) {
+            return "blue";
+        }
+        return DEFAULT_BBOX_COLOR;
+    }
+
+    /**
+     * 获取提框类型
+     */
+    public String getExtractWindowType(OriginalAlarmRecord record) {
+        String company = record.getCompany();
+        if (company == null) {
+            return DEFAULT_BBOX_TYPE;
         }
 
-        if(company.equals("之江智能")){
-            if(eventType.equals("抛洒物")){
-                bboxType = "zhijiang_paosawu";
-            }else{
-                bboxType = "zhijiang";
+        switch (company) {
+            case "高瞳":
+                return "gaotong";
+            case "之江智能":
+                return "抛洒物".equals(record.getEventType()) ? "zhijiang_paosawu" : "zhijiang";
+            default:
+                return DEFAULT_BBOX_TYPE;
+        }
+    }
+
+    /**
+     * 解析接口响应为提框记录
+     */
+    public ExtractWindowRecord parseResponse(String responseBodyStr, OriginalAlarmRecord alarmRecord,
+                                              String alarmId, String imagePath, String videoPath) {
+        ExtractWindowRecord record = new ExtractWindowRecord();
+        // 基础字段赋值
+        record.setAlarmId(alarmId);
+        record.setImagePath(imagePath);
+        record.setVideoPath(videoPath);
+        record.setReceivedTime(LocalDateTime.now());
+        record.setCreateTime(LocalDateTime.now());
+        record.setModifyTime(LocalDateTime.now());
+
+        try {
+            JSONArray responseArray = JSONArray.parseArray(responseBodyStr);
+            if (responseArray.isEmpty()) {
+                log.warn("响应数组为空，使用默认坐标 | alarmId:{} | imagePath:{} | videoPath:{}",
+                        alarmId, imagePath, videoPath);
+                setDefaultCoords(record);
+                return record;
             }
+
+            JSONObject resultObj = responseArray.getJSONObject(0);
+            record.setImageId(resultObj.getString("image_id"));
+            record.setStatus(resultObj.getIntValue("status"));
+
+            // 解析坐标数据
+            String data = resultObj.getString("data");
+            if (isEmpty(data)) {
+                log.warn("响应data为空，使用默认坐标 | alarmId:{} | imagePath:{} | videoPath:{}",
+                        alarmId, imagePath, videoPath);
+                setDefaultCoords(record);
+                return record;
+            }
+
+            JSONArray dataArray = JSONArray.parseArray(data);
+            if (dataArray.isEmpty()) {
+                log.warn("data数组为空，使用默认坐标 | alarmId:{} | imagePath:{} | videoPath:{}",
+                        alarmId, imagePath, videoPath);
+                setDefaultCoords(record);
+                return record;
+            }
+
+            JSONObject dataObj = dataArray.getJSONObject(0);
+            JSONArray pointsArray = JSONArray.parseArray(dataObj.getString("points"));
+            if (pointsArray.size() < 2) {
+                log.warn("points数组元素不足，使用默认坐标 | alarmId:{} | imagePath:{} | videoPath:{} | 实际点数:{}",
+                        alarmId, imagePath, videoPath, pointsArray.size());
+                setDefaultCoords(record);
+                return record;
+            }
+
+            // 正常解析坐标
+            JSONObject point1 = pointsArray.getJSONObject(0);
+            JSONObject point2 = pointsArray.getJSONObject(1);
+            record.setPoint1X(point1.getIntValue("x"));
+            record.setPoint1Y(point1.getIntValue("y"));
+            record.setPoint2X(point2.getIntValue("x"));
+            record.setPoint2Y(point2.getIntValue("y"));
+
+        } catch (Exception e) {
+            log.error("响应解析异常，使用默认坐标 | alarmId:{} | imagePath:{} | videoPath:{}",
+                    alarmId, imagePath, videoPath, e);
+            setDefaultCoords(record);
         }
-        return bboxType;
+
+        return record;
+    }
+
+    /**
+     * 设置默认坐标（无数据时）
+     */
+    public void setDefaultCoords(ExtractWindowRecord record) {
+        record.setPoint1X(DEFAULT_COORD);
+        record.setPoint1Y(DEFAULT_COORD);
+        record.setPoint2X(DEFAULT_COORD);
+        record.setPoint2Y(DEFAULT_COORD);
+    }
+
+    /**
+     * 字符串空值判断（工具方法）
+     */
+    public boolean isEmpty(String str) {
+        return str == null || str.trim().isEmpty();
     }
 }
