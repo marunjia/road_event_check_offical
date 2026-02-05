@@ -8,7 +8,7 @@ import com.yuce.service.CollectionGroupService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
-import org.springframework.util.Assert;
+import org.springframework.util.StringUtils;
 
 import java.util.List;
 import java.util.Map;
@@ -49,8 +49,12 @@ public class CollectionGroupServiceImpl extends ServiceImpl<CollectionGroupMappe
      * @param groupId
      * @return
      */
-    public List<Map<String, Object>> queryByCollectionIdAndGroupId(String collectionId,String groupId) {
-        return collectionGroupMapper.queryByCollectionIdAndGroupId(collectionId, groupId);
+    public List<Map<String, Object>> queryByCollectionIdAndGroupId(Integer collectionId,String groupId) {
+        if(!StringUtils.hasText(groupId)){
+            return collectionGroupMapper.queryByCollectionId(collectionId);
+        }else{
+            return collectionGroupMapper.queryByCollectionIdAndGroupId(collectionId, groupId);
+        }
     }
 
     /**
@@ -58,7 +62,7 @@ public class CollectionGroupServiceImpl extends ServiceImpl<CollectionGroupMappe
      * @param groupId
      * @return
      */
-    public CollectionGroupRecord queryTop1ByCollectionIdAndGroupId(String collectionId,String groupId) {
+    public CollectionGroupRecord queryTop1ByCollectionIdAndGroupId(Integer collectionId,String groupId) {
         QueryWrapper<CollectionGroupRecord> queryWrapper = new QueryWrapper<>();
         queryWrapper.eq("collection_id", collectionId);
         queryWrapper.eq("group_id", groupId);
@@ -72,21 +76,9 @@ public class CollectionGroupServiceImpl extends ServiceImpl<CollectionGroupMappe
      * @param collectionId
      * @return
      */
-    public List<Map<String, Object>> getIndexByCollectionId(String collectionId) {
+    public List<Map<String, Object>> getIndexByCollectionId(Integer collectionId) {
         // 参数校验：避免无效查询
-        Assert.hasText(collectionId, "告警集ID（collectionId）不能为空");
         List<Map<String, Object>> statMapList = collectionGroupMapper.getIndexByCollectionId(collectionId);
         return statMapList;
     }
-
-
-
-
-
-
-
-
-
-
-
 }

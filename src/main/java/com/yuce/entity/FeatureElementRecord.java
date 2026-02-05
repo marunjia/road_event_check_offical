@@ -20,6 +20,8 @@ public class FeatureElementRecord {
     @TableId(type = IdType.AUTO)
     private Integer id; // 主键ID
 
+    private Long tblId;
+
     private String alarmId; // 告警ID，关联外部告警表
 
     private String imagePath; // 告警ID，关联外部告警表
@@ -56,9 +58,11 @@ public class FeatureElementRecord {
 
     private Integer personCheckFlag; // 人工检验标签:1未核查，2确认事件，3无需处理，4误报
 
-    private Integer matchCheckFlag; // 关联是否正确：0否、1是
+    private Integer matchCheckFlag; // 关联是否正确：0未核查、1是、2否
 
     private String matchCheckReason; // 关联错误原因
+
+    private Integer matchCollectionId; // 关联告警集id
 
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createTime;

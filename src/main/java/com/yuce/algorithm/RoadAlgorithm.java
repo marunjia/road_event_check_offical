@@ -7,6 +7,7 @@ import com.yuce.entity.*;
 import com.yuce.service.impl.ExtractWindowServiceImpl;
 import com.yuce.service.impl.FrameImageServiceImpl;
 import com.yuce.service.impl.RoadCheckRecordServiceImpl;
+import com.yuce.util.PolygonCoordinateScaleUtil;
 import com.yuce.util.RoadIntersectionUtil;
 import lombok.extern.slf4j.Slf4j;
 import okhttp3.*;
@@ -62,23 +63,23 @@ public class RoadAlgorithm {
         String imagePath = record.getImagePath();
         String videoPath = record.getVideoPath();
         String eventType = record.getEventType();
-        log.info("调用路面检测服务(use roadCheck service):alarmId->{},imagePath->{},videoPath->{}", alarmId, imagePath, videoPath);
-
-        FrameImageInfo frameImageInfo = frameImageServiceImpl.getFrameByKeyAndNo(alarmId, imagePath, videoPath, 1);
 
         /**
          * 检查路面算法是否已检测
          */
-        if(roadCheckRecordServiceImpl.getRecordByKeyAndType(alarmId, imagePath, videoPath,"road").size() > 0){
-            log.info("路面算法已检测：tblId->{}, alarmId->{}, imagePath->{}, videoPath->{}", tblId, alarmId, imagePath, videoPath);
+        if(roadCheckRecordServiceImpl.getRecordByTblIdAndType(tblId,"road").size() > 0){
+            log.info("路面算法已检测：tblId:{} | alarmId:{} | imagePath:{} | videoPath:{}", tblId, alarmId, imagePath, videoPath);
             return;
         }
+
+        //获取抽帧3张图的中间图片
+        FrameImageInfo frameImageInfo = frameImageServiceImpl.getFrameByKeyAndNo(alarmId, imagePath, videoPath, 1);
 
         String jsonBody;
         try {
             jsonBody = mapper.writeValueAsString(buildRequestData(record,frameImageInfo));
         } catch (IOException e) {
-            throw new IOException(String.format("路面算法请求体序列化失败,alarmId->%s,imagePath->%s,videoPath->%s", alarmId, imagePath, videoPath));
+            throw new IOException(String.format("路面算法请求体序列化失败, tblId:%s | alarmId:%s | imagePath:%s | videoPath:%s", tblId, alarmId, imagePath, videoPath));
         }
 
         // 构造请求
@@ -88,14 +89,13 @@ public class RoadAlgorithm {
         // 执行同步请求
         try (Response response = client.newCall(request).execute()) {
             if (response == null || !response.isSuccessful()) {
-                log.error("路面检测算法接口返回非成功状态: code={}, alarm_id->{}", response != null ? response.code() : "null",alarmId);
+                log.error("路面检测算法接口返回非成功状态: code:{} | tblId:{} | alarmId:{} | imagePath:{} | videoPath:{}", response != null ? response.code() : "null", tblId, alarmId, imagePath, videoPath);
                 return;
             }
 
             // 关键：只读取一次响应体，并确保日志中不重复调用
             String responseBody = response.body() != null ? response.body().string() : null;
-            log.info("路面检测算法服务:alarmId->{}, imagePath->{}, videoPath->{}, 请求体内容 -> {}, 返回体 -> {}", alarmId, imagePath, videoPath, jsonBody, responseBody);
-
+            //log.info("路面检测算法服务:alarmId->{}, imagePath->{}, videoPath->{}, 请求体内容 -> {}, 返回体 -> {}", alarmId, imagePath, videoPath, jsonBody, responseBody);
             if (responseBody == null || responseBody.isEmpty()) {
                 return;
             }
@@ -126,6 +126,7 @@ public class RoadAlgorithm {
                         String points = subJsonObject.getString("points");
 
                         RoadCheckRecord roadCheckRecord = new RoadCheckRecord();
+                        roadCheckRecord.setTblId(tblId);
                         roadCheckRecord.setAlarmId(alarmId);
                         roadCheckRecord.setImagePath(imagePath);
                         roadCheckRecord.setVideoPath(videoPath);
@@ -133,7 +134,9 @@ public class RoadAlgorithm {
                         roadCheckRecord.setType(type);
                         roadCheckRecord.setName(name);
                         roadCheckRecord.setStatus(status);
-                        roadCheckRecord.setPoints(points);
+                        roadCheckRecord.setOriginalPoints(points);
+                        String scalePoints = PolygonCoordinateScaleUtil.scalePoints(points);
+                        roadCheckRecord.setScaledUpPoints(scalePoints);
                         roadCheckRecord.setExtractImageUrl(frameImageInfo.getImageUrl());
                         roadCheckRecord.setCreateTime(LocalDateTime.now());
                         roadCheckRecord.setUpdateTime(LocalDateTime.now());
@@ -147,8 +150,7 @@ public class RoadAlgorithm {
                             roadCheckRecord.setExtractPoint1Y(midY);
                             roadCheckRecord.setExtractPoint2X(baseX2);
                             roadCheckRecord.setExtractPoint2Y(baseY2);
-                            log.info("路面算法检测坐标：tblId->{}, alarmId->{}, imagePath->{}, videoPath->{},({},{},{},{})", tblId, alarmId, imagePath, videoPath, baseX1, midY, baseX2, baseY2);
-                            percent = RoadIntersectionUtil.calculateIntersectionRatioByRectanglePixels(points ,getRectangle(baseX1, midY, baseX2, baseY2));
+                            percent = RoadIntersectionUtil.calculateIntersectionRatioByRectanglePixels(scalePoints ,getRectangle(baseX1, midY, baseX2, baseY2));
                         }
 
                         if(eventType.equals("抛洒物")){
@@ -156,7 +158,7 @@ public class RoadAlgorithm {
                             roadCheckRecord.setExtractPoint1Y(baseY1);
                             roadCheckRecord.setExtractPoint2X(baseX2);
                             roadCheckRecord.setExtractPoint2Y(baseY2);
-                            percent = RoadIntersectionUtil.calculateIntersectionRatioByRectanglePixels(points ,getRectangle(baseX1, baseY1, baseX2, baseY2));
+                            percent = RoadIntersectionUtil.calculateIntersectionRatioByRectanglePixels(scalePoints ,getRectangle(baseX1, baseY1, baseX2, baseY2));
                         }
                         roadCheckRecord.setPercent(percent);
 
@@ -170,6 +172,7 @@ public class RoadAlgorithm {
                     }
                 } else {
                     RoadCheckRecord roadCheckRecord = new RoadCheckRecord();
+                    roadCheckRecord.setTblId(tblId);
                     roadCheckRecord.setAlarmId(alarmId);
                     roadCheckRecord.setImagePath(imagePath);
                     roadCheckRecord.setVideoPath(videoPath);
@@ -188,9 +191,9 @@ public class RoadAlgorithm {
                 }
             }
             roadCheckRecordServiceImpl.saveBatch(roadCheckRecordList);
-            log.info("告警记录完成路面检测：alarmId->{},imagePath->{},videoPath->", alarmId, imagePath, videoPath);
+            log.info("告警记录完成路面检测：tblId:{} | alarmId:{} | imagePath:{} | videoPath:{}", tblId, alarmId, imagePath, videoPath);
         } catch (IOException e) {
-            throw new IOException(String.format("路面算法请求异常,alarmId->%s,imagePath->%s,videoPath->%s", alarmId, imagePath, videoPath));
+            throw new IOException(String.format("路面算法请求异常, tblId:%s | alarmId:%s | imagePath:%s | videoPath:%s", tblId, alarmId, imagePath, videoPath));
         }
     }
 

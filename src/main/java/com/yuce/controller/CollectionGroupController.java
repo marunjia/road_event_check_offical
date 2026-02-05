@@ -32,25 +32,28 @@ public class CollectionGroupController {
     /**
      * @desc 根据collectionId和groupId查询告警组对应告警记录
      * @param groupId
-     * @param collectionId
+     * @param id
      * @return
      */
     @GetMapping("/list/by-colleciton-group")
-    public ApiResponse queryByCollectionIdAndGroupId(@RequestParam(required = true) String collectionId,@RequestParam(required = true) String groupId) {
-        if (groupId == null || groupId.isEmpty() || collectionId == null || collectionId.isEmpty()) {
-            return ApiResponse.fail(400, "参数collectionId、groupId不能为空");
+    public ApiResponse queryByCollectionIdAndGroupId(@RequestParam(required = true) Integer id,@RequestParam(required = true) String groupId) {
+        if (id == null) {
+            return ApiResponse.fail(400, "参数collectionId不能为空");
         }
-        return ApiResponse.success(collectionGroupServiceImpl.queryByCollectionIdAndGroupId(collectionId,groupId));
+        return ApiResponse.success(collectionGroupServiceImpl.queryByCollectionIdAndGroupId(id,groupId));
     }
 
     /**
      * @desc 根据告警集id统计告警组分布情况
-     * @param collectionId
+     * @param id
      * @return
      */
     @GetMapping("/group-index-stat")
-    public ApiResponse getIndexByCollectionId(@RequestParam String collectionId) {
-        List<Map<String, Object>> statMapList = collectionGroupServiceImpl.getIndexByCollectionId(collectionId);
+    public ApiResponse getIndexByCollectionId(@RequestParam Integer id) {
+        if (id == null) {
+            return ApiResponse.fail(400, "参数collectionId不能为空");
+        }
+        List<Map<String, Object>> statMapList = collectionGroupServiceImpl.getIndexByCollectionId(id);
         return ApiResponse.success(statMapList);
     }
 }

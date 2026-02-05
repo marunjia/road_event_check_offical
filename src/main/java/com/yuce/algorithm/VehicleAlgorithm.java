@@ -20,9 +20,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
-
 import java.io.IOException;
-import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
@@ -100,16 +98,13 @@ public class VehicleAlgorithm {
         String alarmId = record.getId();
         String imagePath = record.getImagePath();
         String videoPath = record.getVideoPath();
-        if (!validateCoreFields(alarmId, imagePath, videoPath, tblId)) {
-            return false;
-        }
 
         // 2. 日志前缀：所有日志统一包含关键标识
         String logPrefix = String.format("alarmId:%s | imagePath:%s | videoPath:%s | tblId:%d", alarmId, imagePath, videoPath, tblId);
         log.info("开始停驶算法处理 | {}", logPrefix);
 
         // 3. 重复检测校验（避免重复调用接口）
-        if (isAlreadyProcessed(alarmId, imagePath, videoPath)) {
+        if (isAlreadyProcessed(tblId)) {
             log.info("停驶算法已处理，跳过 | {}", logPrefix);
             return true;
         }
@@ -134,40 +129,14 @@ public class VehicleAlgorithm {
         }
     }
 
-
-    // ------------------------------ 私有工具方法（单一职责，日志全链路覆盖） ------------------------------
-    /**
-     * 校验核心字段非空（避免空指针异常）
-     */
-    private boolean validateCoreFields(String alarmId, String imagePath, String videoPath, Long tblId) {
-        if (!StringUtils.hasText(alarmId)) {
-            log.error("停驶算法处理失败：alarmId为空");
-            return false;
-        }
-        if (!StringUtils.hasText(imagePath)) {
-            log.error("停驶算法处理失败 | alarmId:{} | imagePath为空", alarmId);
-            return false;
-        }
-        if (!StringUtils.hasText(videoPath)) {
-            log.error("停驶算法处理失败 | alarmId:{} | imagePath:{} | videoPath为空", alarmId, imagePath);
-            return false;
-        }
-        if (tblId == null || tblId <= 0) {
-            log.error("停驶算法处理失败 | alarmId:{} | imagePath:{} | tblId非法（需>0）", alarmId, imagePath);
-            return false;
-        }
-        return true;
-    }
-
     /**
      * 检查是否已处理（通过查询检测结果判断）
      */
-    private boolean isAlreadyProcessed(String alarmId, String imagePath, String videoPath) {
+    private boolean isAlreadyProcessed(long tblId) {
         try {
-            return checkAlarmResultMapper.getResultByKey(alarmId, imagePath, videoPath) != null;
+            return checkAlarmResultMapper.getResultByTblId(tblId) != null;
         } catch (Exception e) {
-            log.error("查询停驶算法处理状态异常 | alarmId:{} | imagePath:{} | videoPath:{} | 异常:{}",
-                    alarmId, imagePath, videoPath, e.getMessage());
+            log.error("查询停驶算法处理状态异常 | tblId:{} | 异常:{}", tblId, e.getMessage());
             return false; // 查库异常时允许继续处理，避免阻塞流程
         }
     }
@@ -302,6 +271,7 @@ public class VehicleAlgorithm {
      * 解析接口响应并保存处理记录
      */
     private boolean parseAndSaveResponse(String responseBody, OriginalAlarmRecord record, String logPrefix) {
+        long tblId = record.getTblId();
         String alarmId = record.getId();
         String imagePath = record.getImagePath();
         String videoPath = record.getVideoPath();
@@ -334,13 +304,12 @@ public class VehicleAlgorithm {
                     for (int j = 0; j < dataArray.size(); j++) {
                         JSONObject dataObj = dataArray.getJSONObject(j);
                         processList.add(buildNormalProcessRecord(
-                                dataObj, alarmId, imagePath, videoPath, imageId, status,
+                                dataObj, tblId, alarmId, imagePath, videoPath, imageId, status,
                                 baseX1, baseY1, baseX2, baseY2, now, logPrefix));
                     }
                 } else {
                     // 2.2 无检测结果：生成空记录
-                    processList.add(buildEmptyProcessRecord(
-                            alarmId, imagePath, videoPath, imageId, status, now));
+                    processList.add(buildEmptyProcessRecord(tblId, alarmId, imagePath, videoPath, imageId, status, now));
                     log.warn("停驶算法无检测数据 | {} | imageId:{}", logPrefix, imageId);
                 }
             }
@@ -360,11 +329,12 @@ public class VehicleAlgorithm {
     /**
      * 构建有检测结果的CheckAlarmProcess
      */
-    private CheckAlarmProcess buildNormalProcessRecord(JSONObject dataObj, String alarmId, String imagePath, String videoPath,
+    private CheckAlarmProcess buildNormalProcessRecord(JSONObject dataObj, long tblId, String alarmId, String imagePath, String videoPath,
                                                        String imageId, int status, int baseX1, int baseY1, int baseX2, int baseY2,
                                                        LocalDateTime now, String logPrefix) {
         CheckAlarmProcess process = new CheckAlarmProcess();
         // 基础关联字段
+        process.setTblId(tblId);
         process.setAlarmId(alarmId);
         process.setImageId(imageId);
         process.setImagePath(imagePath);
@@ -415,9 +385,10 @@ public class VehicleAlgorithm {
     /**
      * 构建无检测结果的CheckAlarmProcess（空数据）
      */
-    private CheckAlarmProcess buildEmptyProcessRecord(String alarmId, String imagePath, String videoPath,
+    private CheckAlarmProcess buildEmptyProcessRecord(long tblId, String alarmId, String imagePath, String videoPath,
                                                       String imageId, int status, LocalDateTime now) {
         CheckAlarmProcess process = new CheckAlarmProcess();
+        process.setTblId(tblId);
         process.setAlarmId(alarmId);
         process.setImageId(imageId);
         process.setImagePath(imagePath);

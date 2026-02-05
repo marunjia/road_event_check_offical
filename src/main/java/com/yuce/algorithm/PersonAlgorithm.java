@@ -3,10 +3,7 @@ package com.yuce.algorithm;
 import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.yuce.entity.CheckAlarmProcess;
-import com.yuce.entity.ExtractWindowRecord;
-import com.yuce.entity.FrameImageInfo;
-import com.yuce.entity.OriginalAlarmRecord;
+import com.yuce.entity.*;
 import com.yuce.mapper.CheckAlarmResultMapper;
 import com.yuce.service.impl.CheckAlarmProcessServiceImpl;
 import com.yuce.service.impl.ExtractWindowServiceImpl;
@@ -65,10 +62,10 @@ public class PersonAlgorithm {
     private CheckAlarmResultMapper checkAlarmResultMapper;
 
     @Autowired
-    private CheckAlarmProcessServiceImpl checkAlarmProcessService;
+    private CheckAlarmProcessServiceImpl checkAlarmProcessServiceImpl;
 
     @Autowired
-    private ExtractWindowServiceImpl extractWindowService;
+    private ExtractWindowServiceImpl extractWindowServiceImpl;
 
     @Autowired
     private ExtractWindowAlgorithm extractWindowAlgorithm;
@@ -86,8 +83,6 @@ public class PersonAlgorithm {
     /** ObjectMapper单例（避免重复创建，提升序列化性能） */
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-
-    // ------------------------------ 核心业务方法 ------------------------------
     /**
      * 行人算法处理：调用检测接口 → 解析结果 → 存储检测过程 → 返回处理状态
      */
@@ -97,13 +92,9 @@ public class PersonAlgorithm {
         String alarmId = record.getId();
         String imagePath = record.getImagePath();
         String videoPath = record.getVideoPath();
-        if (!validateCoreFields(alarmId, imagePath, videoPath, tblId)) {
-            return false;
-        }
 
         // 2. 重复处理校验（避免重复调用接口和入库）
-        if (isAlarmChecked(alarmId, imagePath, videoPath)) {
-            log.info("行人算法已处理，跳过 | tblId:{} | alarmId:{} | imagePath:{} | videoPath:{}", tblId, alarmId, imagePath, videoPath);
+        if (isAlreadyChecked(tblId)) {
             return true;
         }
 
@@ -112,86 +103,57 @@ public class PersonAlgorithm {
         try {
             Map<String, Object> requestData = buildRequestData(record);
             requestBody = objectMapper.writeValueAsString(requestData);
-            log.debug("行人算法请求参数 | tblId:{} | alarmId:{} | imagePath:{} | videoPath:{}, | requestBody:{}",  tblId, alarmId, imagePath, videoPath, requestBody);
         } catch (IOException e) {
-            log.error("行人算法请求体序列化失败 | alarmId:{} | tblId:{}", alarmId, tblId, e);
+            log.error("行人算法检查异常: tblId:{} | alarmId:{} | imagePath:{} | videoPath:{} | 异常信息:{}", tblId, alarmId, imagePath, imagePath, e.getMessage());
             return false;
         }
 
         // 4. 调用行人检测接口并处理响应
         try {
             // 4.1 发送接口请求
-            String responseBody = callPersonDetectApi(requestBody, alarmId, imagePath, videoPath);
+            String responseBody = callPersonDetectApi(requestBody, tblId);
             if (StringUtils.isEmpty(responseBody)) {
-                log.error("行人算法接口返回空响应 | alarmId:{} | imagePath:{} | videoPath:{}", alarmId, imagePath, videoPath);
+                log.error("行人算法检测结果返回为null: tblId:{} | alarmId:{} | imagePath:{} | videoPath:{}", tblId, alarmId, imagePath, imagePath);
                 return false;
             }
 
             // 4.2 查询提框坐标（后续计算IOU必需）
             ExtractWindowRecord extractRecord = getExtractWindowRecord(alarmId, imagePath, videoPath);
             if (extractRecord == null) {
-                log.error("未查询到提框记录，无法计算IOU | alarmId:{} | imagePath:{} | videoPath:{}", alarmId, imagePath, videoPath);
+                log.error("告警记录提框失败：tblId:{} | alarmId:{} | imagePath:{} | videoPath:{}", tblId, alarmId, imagePath, videoPath);
                 return false;
             }
 
             // 4.3 解析响应并构建检测过程列表
-            List<CheckAlarmProcess> processList = parseApiResponse(
-                    responseBody, alarmId, imagePath, videoPath, extractRecord);
+            List<CheckAlarmProcess> processList = parseApiResponse(tblId, responseBody, alarmId, imagePath, videoPath, extractRecord);
             if (CollectionUtils.isEmpty(processList)) {
-                log.warn("行人算法未解析到有效检测结果 | alarmId:{} | imagePath:{} | videoPath:{}", alarmId, imagePath, videoPath);
-                // 无结果时仍需存储空记录（标记处理状态），避免后续重复处理
-                processList = buildEmptyProcessList(alarmId, imagePath, videoPath);
+                log.error("告警记录行人检测未获得有效返回体：tblId:{} | alarmId:{} | imagePath:{} | videoPath:{}", tblId, alarmId, imagePath, videoPath);
+                processList = buildEmptyProcessList(tblId, alarmId, imagePath, videoPath);
             }
 
             // 4.4 批量存储检测结果
-            boolean saveResult = checkAlarmProcessService.saveBatch(processList);
+            boolean saveResult = checkAlarmProcessServiceImpl.saveBatch(processList);
             if (saveResult) {
-                log.info("行人算法处理成功，检测结果已入库 | alarmId:{}  | imagePath:{} | videoPath:{} | 检测记录数:{}", alarmId, imagePath, videoPath, processList.size());
+                log.error("告警记录行人检测成功且入库成功：tblId:{} | alarmId:{} | imagePath:{} | videoPath:{}", tblId, alarmId, imagePath, videoPath);
             } else {
-                log.error("行人算法检测结果入库失败 | alarmId:{} | imagePath:{} | videoPath:{}", alarmId, imagePath, videoPath);
+                log.error("告警记录行人检测成功但入库失败：tblId:{} | alarmId:{} | imagePath:{} | videoPath:{}", tblId, alarmId, imagePath, videoPath);
             }
             return saveResult;
-
         } catch (Exception e) {
-            log.error("行人算法处理异常 | tblId:{} | alarmId:{} | imagePath:{} | videoPath:{}", tblId, alarmId, imagePath, videoPath, e);
+            log.error("行人算法检查异常: tblId:{} | alarmId:{} | imagePath:{} | videoPath:{} | 异常信息:{}", tblId, alarmId, imagePath, imagePath, e.getMessage());
             return false;
         }
-    }
-
-
-    // ------------------------------ 私有工具方法（单一职责，便于维护） ------------------------------
-    /**
-     * 校验核心字段非空（alarmId、imagePath、videoPath、tblId为必需）
-     */
-    private boolean validateCoreFields(String alarmId, String imagePath, String videoPath, Long tblId) {
-        if (!StringUtils.hasText(alarmId)) {
-            log.error("行人算法处理失败：alarmId为空");
-            return false;
-        }
-        if (!StringUtils.hasText(imagePath)) {
-            log.error("行人算法处理失败：imagePath为空 | alarmId:{}", alarmId);
-            return false;
-        }
-        if (!StringUtils.hasText(videoPath)) {
-            log.error("行人算法处理失败：videoPath为空 | alarmId:{} | imagePath:{}", alarmId, imagePath);
-            return false;
-        }
-        if (tblId == null || tblId <= 0) {
-            log.error("行人算法处理失败：tblId非法（需大于0） | alarmId:{} | imagePath:{} | videoPath:{}", alarmId, imagePath, videoPath);
-            return false;
-        }
-        return true;
     }
 
     /**
      * 检查告警是否已处理（通过初检结果判断）
      */
-    private boolean isAlarmChecked(String alarmId, String imagePath, String videoPath) {
-        try {
-            return checkAlarmResultMapper.getResultByKey(alarmId, imagePath, videoPath) != null;
-        } catch (Exception e) {
-            log.error("查询告警处理状态异常，默认按未处理继续 | alarmId:{} | imagePath:{} | videoPath:{}", alarmId, imagePath, videoPath, e);
-            return false; // 查库异常时允许继续处理，避免阻塞流程
+    private boolean isAlreadyChecked(long tblId) {
+        CheckAlarmResult checkAlarmResult = checkAlarmResultMapper.getResultByTblId(tblId);
+        if(checkAlarmResult == null){
+            return false;
+        } else{
+            return true;
         }
     }
 
@@ -207,7 +169,7 @@ public class PersonAlgorithm {
         List<FrameImageInfo> frameList = frameImageService.getFrameListByKey(
                 record.getId(), record.getImagePath(), record.getVideoPath());
         if (CollectionUtils.isEmpty(frameList)) {
-            log.warn("未查询到帧图片列表，返回空请求参数 | alarmId:{} | imagePath:{} | videoPath:{}", record.getId(), record.getImagePath(), record.getVideoPath());
+            log.warn("未获取到抽帧图片, tblId:{} | alarmId:{} | imagePath:{} | videoPath:{}", record.getTblId(), record.getId(), record.getImagePath(), record.getVideoPath());
             root.put("messages", new ArrayList<>());
             return root;
         }
@@ -274,7 +236,7 @@ public class PersonAlgorithm {
     /**
      * 调用行人检测接口
      */
-    private String callPersonDetectApi(String requestBody, String alarmId, String imagePath, String videoPath) throws IOException {
+    private String callPersonDetectApi(String requestBody, long tblId) throws IOException {
         // 构建HTTP请求
         Request request = new Request.Builder()
                 .url(Constant.PERSON_DETECT_URL)
@@ -282,18 +244,16 @@ public class PersonAlgorithm {
                 .addHeader("Connection", "keep-alive")
                 .build();
 
-        log.info("发起行人算法接口请求 | alarmId:{} | imagePath:{} | videoPath:{} | 接口地址:{}", alarmId, imagePath, videoPath, Constant.PERSON_DETECT_URL);
         try (Response response = okHttpClient.newCall(request).execute()) {
-            // 校验响应状态码
             if (response == null || !response.isSuccessful()) {
                 int statusCode = (response != null) ? response.code() : -1;
-                throw new IOException(String.format("接口返回非成功状态码 | alarmId:%s | imagePath:%s | videoPath:%s | 状态码:%d", alarmId, imagePath, videoPath, statusCode));
+                throw new IOException(String.format("行人检测接口返回接口编码异常:%d, tblId:%d", statusCode, tblId));
             }
 
             // 读取响应体（统一处理null情况）
             ResponseBody responseBody = response.body();
             if (responseBody == null) {
-                throw new IOException(String.format("接口返回空响应体 | alarmId:%s | imagePath:%s | videoPath:%s", alarmId, imagePath, videoPath));
+                throw new IOException(String.format("行人检测接口返回数据为null, tblId:%d", tblId));
             }
 
             String responseStr = responseBody.string();
@@ -301,7 +261,6 @@ public class PersonAlgorithm {
             String logResponse = responseStr.length() > Constant.RESPONSE_LOG_MAX_LEN
                     ? responseStr.substring(0, Constant.RESPONSE_LOG_MAX_LEN) + "..."
                     : responseStr;
-            log.info("行人算法接口请求成功 | alarmId:{} | imagePath:{} | videoPath:{} | 响应体:{}", alarmId, imagePath, videoPath, logResponse);
             return responseStr;
         }
     }
@@ -311,9 +270,8 @@ public class PersonAlgorithm {
      */
     private ExtractWindowRecord getExtractWindowRecord(String alarmId, String imagePath, String videoPath) {
         try {
-            return extractWindowService.getExtractWindow(alarmId, imagePath, videoPath);
+            return extractWindowServiceImpl.getExtractWindow(alarmId, imagePath, videoPath);
         } catch (Exception e) {
-            log.error("查询提框记录异常 | alarmId:{} | imagePath:{} | videoPath:{} | 异常详情", alarmId, imagePath, videoPath, e);
             return null;
         }
     }
@@ -321,8 +279,7 @@ public class PersonAlgorithm {
     /**
      * 解析接口响应，构建CheckAlarmProcess列表
      */
-    private List<CheckAlarmProcess> parseApiResponse(String responseBody, String alarmId,
-                                                     String imagePath, String videoPath, ExtractWindowRecord extractRecord) {
+    private List<CheckAlarmProcess> parseApiResponse(long tblId, String responseBody, String alarmId, String imagePath, String videoPath, ExtractWindowRecord extractRecord) {
         List<CheckAlarmProcess> processList = new ArrayList<>();
         LocalDateTime now = LocalDateTime.now();
         int baseX1 = extractRecord.getPoint1X();
@@ -342,14 +299,11 @@ public class PersonAlgorithm {
                     // 有检测结果时，逐个构建CheckAlarmProcess
                     for (int j = 0; j < dataArray.size(); j++) {
                         JSONObject dataObj = dataArray.getJSONObject(j);
-                        processList.add(buildCheckProcess(
-                                alarmId, imagePath, videoPath, imageId, status, dataObj,
-                                baseX1, baseY1, baseX2, baseY2, now));
+                        processList.add(buildCheckProcess(tblId, alarmId, imagePath, videoPath, imageId, status, dataObj, baseX1, baseY1, baseX2, baseY2, now));
                     }
                 } else {
                     // 无检测结果时，构建空的CheckAlarmProcess（标记状态）
-                    processList.add(buildEmptyCheckProcess(
-                            alarmId, imagePath, videoPath, imageId, status, now));
+                    processList.add(buildEmptyCheckProcess(tblId, alarmId, imagePath, videoPath, imageId, status, now));
                 }
             }
         } catch (Exception e) {
@@ -361,11 +315,12 @@ public class PersonAlgorithm {
     /**
      * 构建有检测结果的CheckAlarmProcess
      */
-    private CheckAlarmProcess buildCheckProcess(String alarmId, String imagePath, String videoPath,
+    private CheckAlarmProcess buildCheckProcess(long tblId, String alarmId, String imagePath, String videoPath,
                                                 String imageId, int status, JSONObject dataObj,
                                                 int baseX1, int baseY1, int baseX2, int baseY2, LocalDateTime now) {
         CheckAlarmProcess process = new CheckAlarmProcess();
         // 基础关联字段
+        process.setTblId(tblId);
         process.setAlarmId(alarmId);
         process.setImageId(imageId);
         process.setImagePath(imagePath);
@@ -406,7 +361,7 @@ public class PersonAlgorithm {
             process.setPoint2X(null);
             process.setPoint2Y(null);
             process.setIou(Constant.DEFAULT_IOU);
-            log.warn("检测结果坐标格式异常 | alarmId:{} | imageId:{}", alarmId, imageId);
+            log.warn("coordinate format exception,tblId is:{}", tblId);
         }
         return process;
     }
@@ -414,9 +369,10 @@ public class PersonAlgorithm {
     /**
      * 构建无检测结果的CheckAlarmProcess（空数据）
      */
-    private CheckAlarmProcess buildEmptyCheckProcess(String alarmId, String imagePath, String videoPath,
+    private CheckAlarmProcess buildEmptyCheckProcess(long tblId, String alarmId, String imagePath, String videoPath,
                                                      String imageId, int status, LocalDateTime now) {
         CheckAlarmProcess process = new CheckAlarmProcess();
+        process.setTblId(tblId);
         process.setAlarmId(alarmId);
         process.setImageId(imageId);
         process.setImagePath(imagePath);
@@ -439,11 +395,12 @@ public class PersonAlgorithm {
     /**
      * 构建空检测结果列表（当接口无返回数据时使用）
      */
-    private List<CheckAlarmProcess> buildEmptyProcessList(String alarmId, String imagePath, String videoPath) {
+    private List<CheckAlarmProcess> buildEmptyProcessList(long tblId, String alarmId, String imagePath, String videoPath) {
         List<CheckAlarmProcess> emptyList = new ArrayList<>();
         LocalDateTime now = LocalDateTime.now();
         // 创建一条空记录标记无结果状态
         CheckAlarmProcess emptyProcess = new CheckAlarmProcess();
+        emptyProcess.setTblId(tblId);
         emptyProcess.setAlarmId(alarmId);
         emptyProcess.setImageId("EMPTY_" + System.currentTimeMillis()); // 临时ID
         emptyProcess.setImagePath(imagePath);

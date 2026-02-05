@@ -1,10 +1,16 @@
 package com.yuce.controller;
 
 import com.yuce.common.ApiResponse;
+import com.yuce.entity.IndexStatResult;
 import com.yuce.service.impl.FeatureElementServiceImpl;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.*;
+
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Objects;
 
 /**
  * @ClassName FeatureElementController
@@ -131,4 +137,48 @@ public class FeatureElementController {
             return ApiResponse.fail(401,"更新失败，未找到对应记录");
         }
     }
+
+    /**
+     * @desc 统计指定时间区间范围内关联错误的原因分布情况
+     * @param startTime
+     * @param endTime
+     * @return
+     */
+    @GetMapping("/index/reason/byReasonType")
+    public ApiResponse getIndexByReasonType(
+            @RequestParam("startTime") @DateTimeFormat(pattern = "yyyy-MM-dd HH:mm:ss") LocalDateTime startTime,
+            @RequestParam("endTime") @DateTimeFormat(pattern = "yyyy-MM-dd HH:mm:ss") LocalDateTime endTime) {
+
+        if (Objects.isNull(startTime) || Objects.isNull(endTime)) {
+            return ApiResponse.fail(400,"开始时间/结束时间不能为空");
+        }
+        if (startTime.isAfter(endTime)) {
+            return ApiResponse.fail(400,"开始时间不能晚于结束时间");
+        }
+
+        return ApiResponse.success(featureElementServiceImpl.getIndexByReasonType(startTime, endTime));
+    }
+
+    /**
+     * @desc  统计指定时间区间范围内关联错误的总记录条数
+     * @param startTime
+     * @param endTime
+     * @return
+     */
+    @GetMapping("/index/reason/total")
+    public ApiResponse getIndexMatchErrorCount(
+            @RequestParam("startTime") @DateTimeFormat(pattern = "yyyy-MM-dd HH:mm:ss") LocalDateTime startTime,
+            @RequestParam("endTime") @DateTimeFormat(pattern = "yyyy-MM-dd HH:mm:ss") LocalDateTime endTime) {
+
+        if (Objects.isNull(startTime) || Objects.isNull(endTime)) {
+            return ApiResponse.fail(400,"开始时间/结束时间不能为空");
+        }
+        if (startTime.isAfter(endTime)) {
+            return ApiResponse.fail(400,"开始时间不能晚于结束时间");
+        }
+
+        return ApiResponse.success(featureElementServiceImpl.getIndexMatchErrorCount(startTime, endTime));
+    }
+
+
 }

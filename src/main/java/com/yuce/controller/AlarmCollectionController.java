@@ -17,7 +17,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
-import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
@@ -108,7 +107,7 @@ public class AlarmCollectionController {
                     ? originalAlarmServiceImpl.getById(relatedIds.get(0))
                     : null;
 
-            jsonObject.put("id", alarmCollection.getCollectionId());
+            jsonObject.put("id", alarmCollection.getId());
             jsonObject.put("inferEventTypeId", null);
             jsonObject.put("inferEventTypeName", alarmCollection.getEventType());
             jsonObject.put("suggestion", alarmCollection.getDisposalAdvice());
@@ -212,7 +211,7 @@ public class AlarmCollectionController {
                     ? originalAlarmServiceImpl.getById(relatedIds[0])
                     : null;
 
-            jsonObject.put("id", alarmCollection.getCollectionId());
+            jsonObject.put("id", alarmCollection.getId());
             jsonObject.put("inferEventTypeId", null);
             jsonObject.put("inferEventTypeName", alarmCollection.getEventType());
             jsonObject.put("suggestion", alarmCollection.getDisposalAdvice());
@@ -267,7 +266,7 @@ public class AlarmCollectionController {
     public ApiResponse<IPage<AlarmCollection>> list(
             @RequestParam(defaultValue = "1") Integer pageNo,
             @RequestParam(defaultValue = "10") Integer pageSize,
-            @RequestParam(required = false) String collectionId,
+            @RequestParam(required = false) Integer id,
             @RequestParam(required = false) String startTime,
             @RequestParam(required = false) String endTime,
             @RequestParam(required = false) String deviceId,
@@ -282,20 +281,19 @@ public class AlarmCollectionController {
         Page<AlarmCollection> page = new Page<>(pageNo, pageSize);
         QueryWrapper<AlarmCollection> query = new QueryWrapper<>();
 
-        if (StringUtils.hasText(collectionId)) {
-            query.eq("collection_id", collectionId);
+        if (id != null) {
+            query.eq("id", id);
         }
-
-        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd");
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
         if (StringUtils.hasText(startTime)) {
-            LocalDate date = LocalDate.parse(startTime, formatter);
-            query.ge("earliest_alarm_time", date.atStartOfDay());
+            LocalDateTime startTimeFormat = LocalDateTime.parse(startTime, formatter);
+            query.ge("earliest_alarm_time", startTimeFormat);
         }
 
         if (StringUtils.hasText(endTime)) {
-            LocalDate date = LocalDate.parse(endTime, formatter);
-            query.le("latest_alarm_time", date.atTime(23, 59, 59));
+            LocalDateTime endTimeFormat = LocalDateTime.parse(endTime, formatter);
+            query.le("latest_alarm_time", endTimeFormat);
         }
 
         if (StringUtils.hasText(deviceId)) {
@@ -379,22 +377,22 @@ public class AlarmCollectionController {
 
     /**
      * @desc 根据collectionId查询告警集信息
-     * @param collectionId
+     * @param id
      * @return
      */
     @GetMapping("/query/byCollectionId")
-    public ApiResponse getConnectionByTblId(@RequestParam String collectionId) {
-        return ApiResponse.success(alarmCollectionServiceImpl.getCollectionByCollectionId(collectionId));
+    public ApiResponse getConnectionByTblId(@RequestParam Integer id) {
+        return ApiResponse.success(alarmCollectionServiceImpl.getCollectionByCollectionId(id));
     }
 
     @PutMapping("/update/personCheckFlag/byCollectionId")
-    public ApiResponse updatePersonCheckFlag(@RequestParam String collectionId,
+    public ApiResponse updatePersonCheckFlag(@RequestParam Integer id,
                                              @RequestParam Integer personCheckFlag) {
-        if (collectionId == null || personCheckFlag == null) {
-            return ApiResponse.fail(400,"参数collectionId、personCheckFlag不能为空");
+        if (id == null || personCheckFlag == null) {
+            return ApiResponse.fail(400,"参数id、personCheckFlag不能为空");
         }
 
-        int affectRows = alarmCollectionServiceImpl.updatePersonCheckFlag(collectionId, personCheckFlag);
+        int affectRows = alarmCollectionServiceImpl.updatePersonCheckFlag(id, personCheckFlag);
 
         if (affectRows > 0) {
             return ApiResponse.success("更新成功");
@@ -404,18 +402,60 @@ public class AlarmCollectionController {
     }
 
     @PutMapping("/update/personCheckReason/byCollectionId")
-    public ApiResponse updatePersonCheckFlag(@RequestParam String collectionId,
+    public ApiResponse updatePersonCheckFlag(@RequestParam Integer id,
                                              @RequestParam String personCheckReason) {
-        if (collectionId == null || personCheckReason == null) {
-            return ApiResponse.fail(400,"参数collectionId、personCheckFlag不能为空");
+        if (id == null || personCheckReason == null) {
+            return ApiResponse.fail(400,"参数id、personCheckFlag不能为空");
         }
 
-        int affectRows = alarmCollectionServiceImpl.updatePersonCheckReason(collectionId, personCheckReason);
+        int affectRows = alarmCollectionServiceImpl.updatePersonCheckReason(id, personCheckReason);
 
         if (affectRows > 0) {
             return ApiResponse.success("更新成功");
         } else {
             return ApiResponse.fail(401,"更新失败，未找到对应记录");
         }
+    }
+
+    /**
+     * @desc 统计指定时间区间范围内推定错误的原因分布情况
+     * @param startTime
+     * @param endTime
+     * @return
+     */
+    @GetMapping("/index/reason/byReasonType")
+    public ApiResponse getIndexByReasonType(
+            @RequestParam("startTime") @DateTimeFormat(pattern = "yyyy-MM-dd HH:mm:ss") LocalDateTime startTime,
+            @RequestParam("endTime") @DateTimeFormat(pattern = "yyyy-MM-dd HH:mm:ss") LocalDateTime endTime) {
+
+        if (Objects.isNull(startTime) || Objects.isNull(endTime)) {
+            return ApiResponse.fail(400,"开始时间/结束时间不能为空");
+        }
+        if (startTime.isAfter(endTime)) {
+            return ApiResponse.fail(400,"开始时间不能晚于结束时间");
+        }
+
+        return ApiResponse.success(alarmCollectionServiceImpl.getIndexByReasonType(startTime, endTime));
+    }
+
+    /**
+     * @desc  统计指定时间区间范围内推定错误的总记录条数
+     * @param startTime
+     * @param endTime
+     * @return
+     */
+    @GetMapping("/index/reason/total")
+    public ApiResponse getIndexMatchErrorCount(
+            @RequestParam("startTime") @DateTimeFormat(pattern = "yyyy-MM-dd HH:mm:ss") LocalDateTime startTime,
+            @RequestParam("endTime") @DateTimeFormat(pattern = "yyyy-MM-dd HH:mm:ss") LocalDateTime endTime) {
+
+        if (Objects.isNull(startTime) || Objects.isNull(endTime)) {
+            return ApiResponse.fail(400,"开始时间/结束时间不能为空");
+        }
+        if (startTime.isAfter(endTime)) {
+            return ApiResponse.fail(400,"开始时间不能晚于结束时间");
+        }
+
+        return ApiResponse.success(alarmCollectionServiceImpl.getIndexMatchErrorCount(startTime, endTime));
     }
 }

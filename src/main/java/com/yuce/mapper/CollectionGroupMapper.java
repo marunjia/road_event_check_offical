@@ -25,25 +25,71 @@ public interface CollectionGroupMapper extends BaseMapper<CollectionGroupRecord>
                     "t1.video_path AS videoPath, " +
                     "t2.id AS id, " +
                     "t2.match_check_flag AS matchCheckFlag, " +
-                    "t2.match_check_reason AS matchCheckReason, " +   // ✅ 注意这里的逗号后面一定要带空格
-                    "t3.check_flag AS checkFlag " +                   // ✅ 这一行必须以空格结尾
-                    "FROM (" +
-                    "   SELECT * FROM collection_group_record " +
-                    "   WHERE collection_id = #{collectionId} " +
-                    "   AND group_id = #{groupId} " +
+                    "t2.match_check_reason AS matchCheckReason, " +
+                    "t3.check_flag AS checkFlag, " +
+                    "t4.alarm_time AS alarmTime, " +
+                    "t4.event_type AS eventType " +
+                    "FROM ( " +
+                    "SELECT alarm_id, image_path, video_path, collection_id, group_id " +
+                    "FROM collection_group_record " +
+                    "WHERE collection_id = #{collectionId} " +
+                    "AND group_id = #{groupId} " +
                     ") t1 " +
                     "LEFT JOIN feature_element_record t2 " +
-                    "   ON t1.alarm_id = t2.alarm_id " +
-                    "   AND t1.image_path = t2.image_path " +
-                    "   AND t1.video_path = t2.video_path " +
+                    "ON t1.alarm_id = t2.alarm_id " +
+                    "AND t1.image_path = t2.image_path " +
+                    "AND t1.video_path = t2.video_path " +
                     "LEFT JOIN algorithm_check_result t3 " +
-                    "   ON t1.alarm_id = t3.alarm_id " +
-                    "   AND t1.image_path = t3.image_path " +
-                    "   AND t1.video_path = t3.video_path"
+                    "ON t1.alarm_id = t3.alarm_id " +
+                    "AND t1.image_path = t3.image_path " +
+                    "AND t1.video_path = t3.video_path " +
+                    "LEFT JOIN kafka_original_alarm_record t4 " +
+                    "ON t1.alarm_id = t4.alarm_id " +
+                    "AND t1.image_path = t4.image_path " +
+                    "AND t1.video_path = t4.video_path " +
+                    "ORDER BY t4.alarm_time desc"
     )
     List<Map<String, Object>> queryByCollectionIdAndGroupId(
-            @Param("collectionId") String collectionId,
+            @Param("collectionId") Integer collectionId,
             @Param("groupId") String groupId);
+
+    /**
+     * 根据告警集ID和分组ID查询列表（适配索引 idx_collection_group）
+     * @param collectionId 归属告警集id
+     * @return 分组记录列表
+     */
+    @Select(
+            "SELECT " +
+                    "t1.alarm_id AS alarmId, " +
+                    "t1.image_path AS imagePath, " +
+                    "t1.video_path AS videoPath, " +
+                    "t2.id AS id, " +
+                    "t2.match_check_flag AS matchCheckFlag, " +
+                    "t2.match_check_reason AS matchCheckReason, " +
+                    "t3.check_flag AS checkFlag, " +
+                    "t4.alarm_time AS alarmTime, " +
+                    "t4.event_type AS eventType " +
+                    "FROM ( " +
+                    "SELECT alarm_id, image_path, video_path, collection_id, group_id " +
+                    "FROM collection_group_record " +
+                    "WHERE collection_id = #{collectionId} " +
+                    ") t1 " +
+                    "LEFT JOIN feature_element_record t2 " +
+                    "ON t1.alarm_id = t2.alarm_id " +
+                    "AND t1.image_path = t2.image_path " +
+                    "AND t1.video_path = t2.video_path " +
+                    "LEFT JOIN algorithm_check_result t3 " +
+                    "ON t1.alarm_id = t3.alarm_id " +
+                    "AND t1.image_path = t3.image_path " +
+                    "AND t1.video_path = t3.video_path " +
+                    "LEFT JOIN kafka_original_alarm_record t4 " +
+                    "ON t1.alarm_id = t4.alarm_id " +
+                    "AND t1.image_path = t4.image_path " +
+                    "AND t1.video_path = t4.video_path " +
+                    "ORDER BY t4.alarm_time desc"
+    )
+    List<Map<String, Object>> queryByCollectionId(
+            @Param("collectionId") Integer collectionId);
 
     @Select("SELECT " +
             "group_id as groupId, " +
@@ -59,5 +105,5 @@ public interface CollectionGroupMapper extends BaseMapper<CollectionGroupRecord>
             "count(tbl_id) as alarmNum " +
             "FROM collection_group_record " +
             "WHERE collection_id = #{collectionId}")
-    List<Map<String, Object>> getIndexByCollectionId(@Param("collectionId") String collectionId);
+    List<Map<String, Object>> getIndexByCollectionId(@Param("collectionId") Integer collectionId);
 }

@@ -21,16 +21,23 @@ import java.util.List;
 public interface RoadCheckRecordMapper extends BaseMapper<RoadCheckRecord>{
 
     /**
-     * @desc 根据alarmId、imagePath、vodeoPath、type查询路面内检测结果
+     * @desc 根据tblId、type, checkFlag查询路面内检测结果
+     * @param tblId
+     * @param type
+     * @param checkFlag
+     * @return
+     */
+    @Select("SELECT * FROM road_check_record WHERE tbl_id = #{tblId} and type = #{type} and road_check_flag = #{checkFlag} and image_id != 'id_for_notice'")
+    List<RoadCheckRecord> getRecordByTblIdAndTypeAndFlag(@Param("tblId")long tblId, @Param("type")String type, @Param("checkFlag")Integer checkFlag);
+
+    /**
+     * @desc 根据tblId、type, checkFlag查询路面内检测结果
      * @param alarmId
      * @param imagePath
      * @param videoPath
      * @param type
      * @return
      */
-    @Select("SELECT * FROM road_check_record WHERE alarm_id = #{alarmId} and image_path = #{imagePath} and video_path = #{videoPath} and type = #{type} and road_check_flag = #{checkFlag} and image_id != 'id_for_notice'")
-    List<RoadCheckRecord> getRecordByKeyAndTypeAndFlag(@Param("alarmId")String alarmId, @Param("imagePath")String imagePath, @Param("videoPath")String videoPath, @Param("type")String type, @Param("checkFlag")Integer checkFlag);
-
     @Select("SELECT * FROM road_check_record WHERE alarm_id = #{alarmId} and image_path = #{imagePath} and video_path = #{videoPath} and type = #{type} and image_id != 'id_for_notice'")
     List<RoadCheckRecord> getRecordByKeyAndType(@Param("alarmId")String alarmId, @Param("imagePath")String imagePath, @Param("videoPath")String videoPath, @Param("type")String type);
 

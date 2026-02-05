@@ -29,4 +29,11 @@ public interface FailReasonConfigService extends IService<FailReasonConfig> {
      * @return 是否更新成功
      */
     boolean updateConfig(FailReasonConfig failReasonConfig);
+
+    /**
+     * 删除失败原因配置（根据ID）
+     * @param id 配置信息（需包含ID）
+     * @return 是否更新成功
+     */
+    boolean deleteConfigById(Long id);
 }

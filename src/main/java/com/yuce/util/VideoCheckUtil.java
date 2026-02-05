@@ -142,8 +142,7 @@ public class VideoCheckUtil {
                 minRequired = OBJECT_PEDESTRIAN_MIN_DURATION;
                 break;
             default:
-                log.warn("[视频校验失败] 未知事件类型，不支持时长校验 | 告警ID:{} | 事件类型:{}", alarmId, eventType);
-                return false;
+                minRequired = 1.0;
         }
 
         boolean supported = durationSec >= minRequired;

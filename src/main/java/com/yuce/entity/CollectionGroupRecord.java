@@ -23,7 +23,7 @@ public class CollectionGroupRecord {
     /**
      * 归属告警集id（非空）
      */
-    private String collectionId;
+    private Integer collectionId;
 
     /**
      * 分组ID（非空）

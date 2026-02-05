@@ -16,8 +16,10 @@ import java.time.LocalDateTime;
  * @Version 1.0
  */
 public interface OriginalAlarmService extends IService<OriginalAlarmRecord> {
-    // 可以定义一些业务逻辑的方法，例如自定义的保存方法
-    void saveIfNotExists(OriginalAlarmRecord record);
 
+    //新增或更新告警记录
+    boolean saveOrUpdateRecord(OriginalAlarmRecord record);
+
+    //分页查询告警记录
     IPage<QueryResultCheckRecord> selectWithOriginaleField(String alarmId, String startDate, String endDate, String deviceName ,String roadId, String direction, String eventType, Integer dealFlag, Integer checkFlag, Integer disposalAdvice, String adviceReason, String deviceId, int pageNo, int pageSize);
 }

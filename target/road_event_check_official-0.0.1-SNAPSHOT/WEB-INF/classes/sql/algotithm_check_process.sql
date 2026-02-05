@@ -1,5 +1,6 @@
 CREATE TABLE `algorithm_check_process` (
    `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT '主键',
+   `tbl_id` bigint(20) NOT NULL COMMENT '原始告警表主键id',
    `alarm_id` varchar(255) DEFAULT NULL COMMENT '关联告警记录id',
    `image_id` varchar(64) NOT NULL COMMENT '图像 ID',
    `image_path` varchar(255) DEFAULT NULL COMMENT '图片路径',
@@ -19,6 +20,7 @@ CREATE TABLE `algorithm_check_process` (
    `modify_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
    PRIMARY KEY (`id`),
    KEY `idx_alarm_id` (`alarm_id`),
+   KEY `idx_tbl_id` (`tbl_id`),
    KEY `idx_image_id` (`image_id`),
    KEY `idx_alarm_image_video` (`alarm_id`,`image_path`,`video_path`)
-) ENGINE=InnoDB AUTO_INCREMENT=2161189 DEFAULT CHARSET=utf8mb4 COMMENT='图像检测数据简化表'
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='图像检测数据简化表'

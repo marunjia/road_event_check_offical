@@ -9,6 +9,10 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Map;
+
 /**
  * @ClassName AlarmCollectionServiceImpl
  * @Description TODO
@@ -62,32 +66,51 @@ public class AlarmCollectionServiceImpl extends ServiceImpl<AlarmCollectionMappe
 
     /**
      * @desc 根拒告警集id查询告警集详情
-     * @param collectionId
+     * @param id
      * @return
      */
-    public AlarmCollection getCollectionByCollectionId(String collectionId) {
+    public AlarmCollection getCollectionByCollectionId(Integer id) {
         QueryWrapper<AlarmCollection> queryWrapper = new QueryWrapper<>();
-        queryWrapper.eq("collection_id", collectionId);
+        queryWrapper.eq("id", id);
         return this.getOne(queryWrapper,false);
     }
 
     /**
      * @desc 根拒告警集id更新人工检验标签
-     * @param collectionId
+     * @param id
+     * @param personCheckFlag
      * @return
      */
-    public int updatePersonCheckFlag(String collectionId, Integer personCheckFlag) {
-       return alarmCollectionMapper.updatePersonCheckFlag(collectionId,personCheckFlag);
+    public int updatePersonCheckFlag(Integer id, Integer personCheckFlag) {
+       return alarmCollectionMapper.updatePersonCheckFlag(id,personCheckFlag);
     }
 
     /**
      * @desc 根拒告警集id更新人工检验标签
-     * @param collectionId
+     * @param id
      * @return
      */
-    public int updatePersonCheckReason(String collectionId, String personCheckReason) {
-        return alarmCollectionMapper.updatePersonCheckReason(collectionId,personCheckReason);
+    public int updatePersonCheckReason(Integer id, String personCheckReason) {
+        return alarmCollectionMapper.updatePersonCheckReason(id,personCheckReason);
     }
 
+    /**
+     * @desc  统计指定时间区间范围内推定错误的原因分布情况
+     * @param startTime
+     * @param endTime
+     * @return
+     */
+    public List<Map<String, Object>> getIndexByReasonType(LocalDateTime startTime, LocalDateTime endTime){
+        return alarmCollectionMapper.getIndexByReasonType(startTime, endTime);
+    }
 
+    /**
+     * @desc  统计指定时间区间范围内推定错误的总记录条数
+     * @param startTime
+     * @param endTime
+     * @return
+     */
+    public List<Map<String, Object>> getIndexMatchErrorCount(LocalDateTime startTime, LocalDateTime endTime){
+        return alarmCollectionMapper.getIndexMatchErrorCount(startTime, endTime);
+    }
 }

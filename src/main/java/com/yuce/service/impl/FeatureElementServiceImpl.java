@@ -8,7 +8,6 @@ import com.yuce.service.FeatureElementService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -41,6 +40,43 @@ public class FeatureElementServiceImpl extends ServiceImpl<FeatureElementMapper,
         queryWrapper.eq("video_path", videoPath);
         queryWrapper.last("limit 1");
         return this.getOne(queryWrapper);
+    }
+
+    /**
+     * @desc 根据联合唯一主键查询特征要素
+     * @param tblId
+     * @return
+     */
+    public FeatureElementRecord getFeatureByTblId(long tblId){
+        QueryWrapper<FeatureElementRecord> queryWrapper = new QueryWrapper();
+        queryWrapper.eq("tbl_id", tblId);
+        queryWrapper.last("limit 1");
+        return this.getOne(queryWrapper);
+    }
+
+    /**
+     * @desc 根据联合唯一主键查询特征要素
+     * @param tblId
+     * @return
+     */
+    public boolean isExistByTblId(long tblId){
+        QueryWrapper<FeatureElementRecord> queryWrapper = new QueryWrapper();
+        queryWrapper.eq("tbl_id", tblId);
+        queryWrapper.last("limit 1");
+        FeatureElementRecord featureElementRecord = featureElementMapper.selectOne(queryWrapper);
+        return featureElementRecord != null ? true : false;
+    }
+
+    /**
+     * 检查特征要素是否已处理（避免重复入库）
+     */
+    private boolean isAlreadyDeal(long tblId) {
+        FeatureElementRecord featureElementRecord = featureElementMapper.getFeatureByTblId(tblId);
+        if(featureElementRecord == null){
+            return false;
+        }else{
+            return true;
+        }
     }
 
     /**
@@ -99,5 +135,25 @@ public class FeatureElementServiceImpl extends ServiceImpl<FeatureElementMapper,
      */
     public List<FeatureElementRecord> getListByTimeRange(LocalDateTime previousMinute, LocalDateTime currentMinute){
         return featureElementMapper.getListByTimeRange(previousMinute, currentMinute);
+    }
+
+    /**
+     * @desc  统计指定时间区间范围内关联错误的原因分布情况
+     * @param startTime
+     * @param endTime
+     * @return
+     */
+    public List<Map<String, Object>> getIndexByReasonType(LocalDateTime startTime, LocalDateTime endTime){
+        return featureElementMapper.getIndexByReasonType(startTime, endTime);
+    }
+
+    /**
+     * @desc  统计指定时间区间范围内关联错误的总记录条数
+     * @param startTime
+     * @param endTime
+     * @return
+     */
+    public List<Map<String, Object>> getIndexMatchErrorCount(LocalDateTime startTime, LocalDateTime endTime){
+        return featureElementMapper.getIndexMatchErrorCount(startTime, endTime);
     }
 }

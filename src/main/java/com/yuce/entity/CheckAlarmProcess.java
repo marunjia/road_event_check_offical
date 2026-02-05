@@ -15,6 +15,10 @@ public class CheckAlarmProcess implements Serializable {
     private Long id;
 
     /** 关联告警记录id */
+    @TableField("tbl_id")
+    private Long tblId;
+
+    /** 关联告警记录id */
     @TableField("alarm_id")
     private String alarmId;
 

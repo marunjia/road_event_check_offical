@@ -38,7 +38,7 @@ public class ExtractWindowAlgorithm{
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Autowired
-    private ExtractWindowServiceImpl extractWindowService;
+    private ExtractWindowServiceImpl extractWindowServiceImpl;
 
 
     // ------------------------------ 初始化 ------------------------------
@@ -51,114 +51,121 @@ public class ExtractWindowAlgorithm{
                 .connectionPool(new ConnectionPool(5, 30, TimeUnit.SECONDS)) // 复用连接
                 .retryOnConnectionFailure(true) // 连接失败自动重试
                 .build();
-        log.info("提框服务初始化完成 | 接口地址:{} | 连接超时:{}s | 读取超时:{}s",
-                EXTRACT_POINT_URL, HTTP_CONNECT_TIMEOUT, HTTP_READ_TIMEOUT);
+        log.info("提框算法初始化完成, api路径地址:{}, http连接超时时间配置:{}s, 读取超时时间配置:{}s", EXTRACT_POINT_URL, HTTP_CONNECT_TIMEOUT, HTTP_READ_TIMEOUT);
     }
 
 
     // ------------------------------ 核心业务方法 ------------------------------
-    public void extractWindow(OriginalAlarmRecord record) throws IOException {
+    public boolean extractWindow(OriginalAlarmRecord record) {
         // 提取核心字段（确保日志可追踪）
         Long tblId = record.getTblId();
         String alarmId = record.getId();
         String imagePath = record.getImagePath();
         String videoPath = record.getVideoPath();
-        log.info("开始提框处理 | alarmId:{} | imagePath:{} | videoPath:{} | tblId:{}",
-                alarmId, imagePath, videoPath, tblId);
-
-        // 入参校验（提前阻断无效请求）
-        validateInput(record, alarmId, imagePath, videoPath);
 
         // 重复提框校验（避免重复调用）
-        if (extractWindowService.existsByKey(alarmId, imagePath, videoPath)) {
-            log.info("提框记录已存在，跳过处理 | alarmId:{} | imagePath:{} | videoPath:{} | tblId:{}",
-                    alarmId, imagePath, videoPath, tblId);
-            return;
+        if (extractWindowServiceImpl.existsByTblId(tblId)) {
+            log.info("告警记录已调用提框算法,不再处理: tblId:{} | alarmId:{} | imagePath:{} | videoPath:{}", tblId, alarmId, imagePath, videoPath);
+            return true;
         }
 
-        // 构建请求参数
-        Map<String, Object> requestData = buildRequestData(record);
-        String requestBodyStr = objectMapper.writeValueAsString(requestData);
-        log.debug("提框请求参数 | alarmId:{} | 请求体:{}", alarmId, requestBodyStr);
+        // 构建请求参数并调用接口
+        String responseBodyStr = null;
+        try {
+            Map<String, Object> requestData = buildRequestData(record);
+            String requestBodyStr = objectMapper.writeValueAsString(requestData);
 
-        // 调用提框接口（自动关闭响应资源）
-        String responseBodyStr;
-        try (Response response = callExtractApi(requestBodyStr, alarmId, imagePath, videoPath)) {
+            // 调用提框接口
+            Response response = callExtractApi(requestBodyStr, tblId);
             if (!response.isSuccessful()) {
-                throw new IOException(String.format(
-                        "提框接口返回失败 | alarmId:%s | imagePath:%s | videoPath:%s | 状态码:%d",
-                        alarmId, imagePath, videoPath, response.code()));
+                log.error("提框算法请求失败: tblId:{} | alarmId:{} | imagePat:{} | videoPath:{} | status code:{}", tblId, alarmId, imagePath, videoPath, response.code());
+                return false;
             }
+
             ResponseBody body = response.body();
             responseBodyStr = (body != null) ? body.string() : null;
-        }
 
-        // 响应体校验
-        if (responseBodyStr == null || responseBodyStr.isEmpty()) {
-            throw new IOException(String.format(
-                    "提框接口返回空响应 | alarmId:%s | imagePath:%s | videoPath:%s",
-                    alarmId, imagePath, videoPath));
-        }
-        log.info("提框接口调用成功 | alarmId:{} | imagePath:{} | videoPath:{} | 响应体:{}",
-                alarmId, imagePath, videoPath, responseBodyStr);
+            // 响应体为空，直接返回false
+            log.info("告警记录调用提框算法：tblId:{} | alarmInd:{} | imagePath:{} | videoPath:{} | 返回体信息:{}", tblId, alarmId, imagePath, videoPath, responseBodyStr);
 
-        // 解析响应并持久化
-        ExtractWindowRecord windowRecord = parseResponse(responseBodyStr, record, alarmId, imagePath, videoPath);
-        extractWindowService.insertWindow(windowRecord);
-        log.info("提框处理完成 | alarmId:{} | imagePath:{} | videoPath:{} | 提框状态:{}",
-                alarmId, imagePath, videoPath, windowRecord.getStatus());
-    }
+            if (responseBodyStr == null || responseBodyStr.isEmpty()) {
+                log.error("提框算法返回结果为空: tblId:{} | alarmId:{} | imagePat:{} | videoPath:{}", tblId, alarmId, imagePath, videoPath);
+                return false;
+            } else{
+                // 解析响应并持久化
+                ExtractWindowRecord extractWindowRecord = new ExtractWindowRecord();
+                // 基础字段赋值
+                extractWindowRecord.setTblId(tblId);
+                extractWindowRecord.setAlarmId(alarmId);
+                extractWindowRecord.setImagePath(imagePath);
+                extractWindowRecord.setVideoPath(videoPath);
+                extractWindowRecord.setReceivedTime(LocalDateTime.now());
+                extractWindowRecord.setCreateTime(LocalDateTime.now());
+                extractWindowRecord.setModifyTime(LocalDateTime.now());
 
+                JSONArray responseArray = JSONArray.parseArray(responseBodyStr);
+                if (responseArray.isEmpty()) {
+                    log.error("提框算法返回结果解析为空: tblId:{} | alarmId:{} | imagePat:{} | videoPath:{}", tblId, alarmId, imagePath, videoPath);
+                    return false;
+                }
 
-    // ------------------------------ 私有工具方法 ------------------------------
-    /**
-     * 校验入参合法性
-     */
-    private void validateInput(OriginalAlarmRecord record, String alarmId, String imagePath, String videoPath) {
-        if (record == null) {
-            throw new IllegalArgumentException("原始告警记录不能为空");
-        }
-        if (isEmpty(alarmId)) {
-            throw new IllegalArgumentException(String.format(
-                    "alarmId不能为空 | imagePath:%s | videoPath:%s", imagePath, videoPath));
-        }
-        if (isEmpty(imagePath)) {
-            throw new IllegalArgumentException(String.format(
-                    "imagePath不能为空 | alarmId:%s | videoPath:%s", alarmId, videoPath));
-        }
-        if (isEmpty(videoPath)) {
-            throw new IllegalArgumentException(String.format(
-                    "videoPath不能为空 | alarmId:%s | imagePath:%s", alarmId, imagePath));
-        }
-        if (isEmpty(record.getDeviceId())) {
-            throw new IllegalArgumentException(String.format(
-                    "deviceId不能为空 | alarmId:%s | imagePath:%s | videoPath:%s",
-                    alarmId, imagePath, videoPath));
+                JSONObject resultObj = responseArray.getJSONObject(0);
+                extractWindowRecord.setImageId(resultObj.getString("image_id"));
+                extractWindowRecord.setStatus(resultObj.getIntValue("status"));
+
+                // 解析坐标数据
+                String data = resultObj.getString("data");
+                if (isEmpty(data)) {
+                    log.error("提框算法返回结果缺失data属性: tblId:{} | alarmId:{} | imagePat:{} | videoPath:{}", tblId, alarmId, imagePath, videoPath);
+                    return false;
+                }
+
+                JSONArray dataArray = JSONArray.parseArray(data);
+                if (dataArray.isEmpty()) {
+                    log.error("提框算法返回结果data属性解析为空: tblId:{} | alarmId:{} | imagePat:{} | videoPath:{}", tblId, alarmId, imagePath, videoPath);
+                    return false;
+                }
+
+                JSONObject dataObj = dataArray.getJSONObject(0);
+                JSONArray pointsArray = JSONArray.parseArray(dataObj.getString("points"));
+                if (pointsArray.size() < 2) {
+                    log.error("提框算法返回结果data属性坐标元素个数小于2: tblId:{} | alarmId:{} | imagePat:{} | videoPath:{}", tblId, alarmId, imagePath, videoPath);
+                    return false;
+                }
+
+                // 正常解析坐标
+                JSONObject point1 = pointsArray.getJSONObject(0);
+                JSONObject point2 = pointsArray.getJSONObject(1);
+                extractWindowRecord.setPoint1X(point1.getIntValue("x"));
+                extractWindowRecord.setPoint1Y(point1.getIntValue("y"));
+                extractWindowRecord.setPoint2X(point2.getIntValue("x"));
+                extractWindowRecord.setPoint2Y(point2.getIntValue("y"));
+                extractWindowServiceImpl.insertWindow(extractWindowRecord);
+                log.info("提框算法调用成功, tblId:{} | alarmId:{} | imagePat:{} | videoPath:{}", tblId, alarmId, imagePath, videoPath);
+                return true; // 所有流程正常，返回true
+            }
+        } catch (Exception e) { // 捕获所有异常（包括JsonProcessingException、IOException等）
+            log.error("提框算法调用异常： tblId:{} | alarmId:{} | imagePat:{} | videoPath:{} | 异常详情:{}", tblId, alarmId, imagePath, videoPath, e.getMessage());
+            return false;
         }
     }
 
     /**
      * 调用提框接口
      */
-    private Response callExtractApi(String requestBodyStr, String alarmId, String imagePath, String videoPath) throws IOException {
+    private Response callExtractApi(String requestBodyStr, long tblId) throws IOException {
         try {
             Request request = new Request.Builder()
                     .url(EXTRACT_POINT_URL)
                     .post(RequestBody.create(requestBodyStr, JSON_MEDIA_TYPE))
                     .addHeader("Connection", "keep-alive")
                     .build();
-            log.debug("发起提框请求 | alarmId:{} | 接口地址:{}", alarmId, EXTRACT_POINT_URL);
             return okHttpClient.newCall(request).execute();
         } catch (IOException e) {
-            log.error("提框接口调用异常 | alarmId:{} | imagePath:{} | videoPath:{}",
-                    alarmId, imagePath, videoPath, e);
             throw e;
         }
     }
 
-    /**
-     * 构建请求参数
-     */
     /**
      * 构建请求参数
      */
@@ -245,76 +252,6 @@ public class ExtractWindowAlgorithm{
             default:
                 return DEFAULT_BBOX_TYPE;
         }
-    }
-
-    /**
-     * 解析接口响应为提框记录
-     */
-    public ExtractWindowRecord parseResponse(String responseBodyStr, OriginalAlarmRecord alarmRecord,
-                                              String alarmId, String imagePath, String videoPath) {
-        ExtractWindowRecord record = new ExtractWindowRecord();
-        // 基础字段赋值
-        record.setAlarmId(alarmId);
-        record.setImagePath(imagePath);
-        record.setVideoPath(videoPath);
-        record.setReceivedTime(LocalDateTime.now());
-        record.setCreateTime(LocalDateTime.now());
-        record.setModifyTime(LocalDateTime.now());
-
-        try {
-            JSONArray responseArray = JSONArray.parseArray(responseBodyStr);
-            if (responseArray.isEmpty()) {
-                log.warn("响应数组为空，使用默认坐标 | alarmId:{} | imagePath:{} | videoPath:{}",
-                        alarmId, imagePath, videoPath);
-                setDefaultCoords(record);
-                return record;
-            }
-
-            JSONObject resultObj = responseArray.getJSONObject(0);
-            record.setImageId(resultObj.getString("image_id"));
-            record.setStatus(resultObj.getIntValue("status"));
-
-            // 解析坐标数据
-            String data = resultObj.getString("data");
-            if (isEmpty(data)) {
-                log.warn("响应data为空，使用默认坐标 | alarmId:{} | imagePath:{} | videoPath:{}",
-                        alarmId, imagePath, videoPath);
-                setDefaultCoords(record);
-                return record;
-            }
-
-            JSONArray dataArray = JSONArray.parseArray(data);
-            if (dataArray.isEmpty()) {
-                log.warn("data数组为空，使用默认坐标 | alarmId:{} | imagePath:{} | videoPath:{}",
-                        alarmId, imagePath, videoPath);
-                setDefaultCoords(record);
-                return record;
-            }
-
-            JSONObject dataObj = dataArray.getJSONObject(0);
-            JSONArray pointsArray = JSONArray.parseArray(dataObj.getString("points"));
-            if (pointsArray.size() < 2) {
-                log.warn("points数组元素不足，使用默认坐标 | alarmId:{} | imagePath:{} | videoPath:{} | 实际点数:{}",
-                        alarmId, imagePath, videoPath, pointsArray.size());
-                setDefaultCoords(record);
-                return record;
-            }
-
-            // 正常解析坐标
-            JSONObject point1 = pointsArray.getJSONObject(0);
-            JSONObject point2 = pointsArray.getJSONObject(1);
-            record.setPoint1X(point1.getIntValue("x"));
-            record.setPoint1Y(point1.getIntValue("y"));
-            record.setPoint2X(point2.getIntValue("x"));
-            record.setPoint2Y(point2.getIntValue("y"));
-
-        } catch (Exception e) {
-            log.error("响应解析异常，使用默认坐标 | alarmId:{} | imagePath:{} | videoPath:{}",
-                    alarmId, imagePath, videoPath, e);
-            setDefaultCoords(record);
-        }
-
-        return record;
     }
 
     /**

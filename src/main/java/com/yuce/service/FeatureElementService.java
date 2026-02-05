@@ -16,13 +16,18 @@ import java.util.List;
 public interface FeatureElementService extends IService<FeatureElementRecord> {
 
     /**
-     * @desc 根据联合唯一主键查询特征要素
-     * @param alarmId
-     * @param imagePath
-     * @param videoPath
+     * @desc 根据tblId查询特征要素
+     * @param tblId
      * @return
      */
-    FeatureElementRecord getFeatureByKey(String alarmId, String imagePath, String videoPath);
+    FeatureElementRecord getFeatureByTblId(long tblId);
+
+    /**
+     * @desc 根据tblId特征要素是否存在
+     * @param tblId
+     * @return
+     */
+    boolean isExistByTblId(long tblId);
 
     /**
      * @desc 根据特征要素id更新告警集关联状态

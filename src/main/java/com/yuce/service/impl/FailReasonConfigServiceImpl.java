@@ -53,4 +53,12 @@ public class FailReasonConfigServiceImpl extends ServiceImpl<FailReasonConfigMap
         }
         return updateById(failReasonConfig);
     }
+
+    @Override
+    public boolean deleteConfigById(Long id) {
+        if (id == null) {
+            throw new IllegalArgumentException("ID不能为空");
+        }
+        return this.removeById(id);
+    }
 }

@@ -25,15 +25,11 @@ public interface FeatureElementMapper extends BaseMapper<FeatureElementRecord>{
 
     /**
      * @desc 根据联合唯一主键查询特征要素
-     * @param alarmId
-     * @param imagePath
-     * @param videoPath
+     * @param tblId
      * @return
      */
-    @Select("SELECT * FROM feature_element_record WHERE alarm_id = #{alarmId} AND image_path = #{imagePath} AND video_path = #{videoPath} LIMIT 1")
-    FeatureElementRecord getFeatureByKey(@Param("alarmId") String alarmId,
-                                       @Param("imagePath") String imagePath,
-                                       @Param("videoPath") String videoPath);
+    @Select("SELECT * FROM feature_element_record WHERE tbl_id = #{tblId} LIMIT 1")
+    FeatureElementRecord getFeatureByTblId(@Param("tblId") long tblId);
 
     /**
      * @desc 根据特征要素id更新告警集关联状态
@@ -84,4 +80,43 @@ public interface FeatureElementMapper extends BaseMapper<FeatureElementRecord>{
     List<FeatureElementRecord> getListByTimeRange(@Param("previousMinute") LocalDateTime previousMinute,
                                                   @Param("currentMinute") LocalDateTime currentMinute);
 
+    /**
+     * @desc 统计指定时间区间范围内关联错误的原因分布情况
+     * @param startTime
+     * @param endTime
+     * @return
+     */
+    @Select({
+            "SELECT ",
+            "    t2.match_check_reason AS reasonType, ",
+            "    COUNT(t2.tbl_id) AS statNum ",
+            "FROM kafka_original_alarm_record t1 ",
+            "JOIN feature_element_record t2 ON t1.tbl_id = t2.tbl_id ",
+            "WHERE t1.alarm_time >= #{startTime} ",
+            "  AND t1.alarm_time <= #{endTime} ",
+            "  AND t2.match_check_reason != '' ",
+            "GROUP BY t2.match_check_reason"
+    })
+    List<Map<String, Object>> getIndexByReasonType(
+            @Param("startTime") LocalDateTime startTime,
+            @Param("endTime") LocalDateTime endTime);
+
+    /**
+     * @desc 统计指定时间区间范围内关联错误的总记录条数
+     * @param startTime
+     * @param endTime
+     * @return
+     */
+    @Select({
+            "SELECT ",
+            "    COUNT(t2.tbl_id) AS statCount ", // 补充别名，方便Map取值
+            "FROM kafka_original_alarm_record t1 ",
+            "JOIN feature_element_record t2 ON t1.tbl_id = t2.tbl_id ",
+            "WHERE t1.alarm_time >= #{startTime} ",
+            "  AND t1.alarm_time <= #{endTime} ",
+            "  AND t2.match_check_reason != ''"
+    })
+    List<Map<String, Object>> getIndexMatchErrorCount(
+            @Param("startTime") LocalDateTime startTime,
+            @Param("endTime") LocalDateTime endTime);
 }

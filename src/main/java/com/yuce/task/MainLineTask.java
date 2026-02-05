@@ -24,8 +24,12 @@ public class MainLineTask implements ApplicationListener<ApplicationReadyEvent> 
     @Autowired
     private EventFetchTask eventFetchTask;
 
+    @Autowired
+    private MysqlFetchTask mysqlFetchTask;
+
     @Override
     public void onApplicationEvent(ApplicationReadyEvent event) {
-        kafkaUtil.startConsumers(15, eventFetchTask);
+        //mysqlFetchTask.totalProcess();
+        kafkaUtil.startConsumers(5, eventFetchTask);
     }
 }

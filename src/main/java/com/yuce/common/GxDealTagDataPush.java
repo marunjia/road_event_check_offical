@@ -31,23 +31,29 @@ public class GxDealTagDataPush {
      * 推送告警集数据到高信接口
      */
     public void pushToGx(OriginalAlarmRecord record) {
+        long tblId = record.getTblId();
+        String alarmId = record.getId();
+        String imagePath = record.getImagePath();
+        String videoPath = record.getVideoPath();
+        String dealFlag = record.getDealFlag();
+
         try {
             //查询原始告警记录并进行推送
             JSONObject jsonObject = new JSONObject();
-            jsonObject.put("id",record.getId());
-            jsonObject.put("imagePath",record.getImagePath());
-            jsonObject.put("videoPath",record.getVideoPath());
+            jsonObject.put("id",alarmId);
+            jsonObject.put("imagePath",imagePath);
+            jsonObject.put("videoPath",videoPath);
             jsonObject.put("confirmStatus",0);//默认为0
-            jsonObject.put("dealFlag",record.getDealFlag());
+            jsonObject.put("dealFlag",dealFlag);
 
             // 发送 POST 请求
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
             HttpEntity<String> entity = new HttpEntity<>(jsonObject.toJSONString(), headers);
             String response = restTemplate.postForObject(API_URL, entity, String.class);
-            log.info("处理标识数据推送成功，响应结果: {}", response);
+            log.info("原始告警记录推送成功，tblId:{} | alarmId:{} | imagePath:{} | videoPath:{}", tblId, alarmId, imagePath, videoPath);
         } catch (Exception e) {
-            log.error("推送广信接口失败", e);
+            log.error("原始告警记录推送失败，tblId:{} | alarmId:{} | imagePath:{} | videoPath:{} | 失败原因:{}", tblId, alarmId, imagePath, videoPath, e);
         }
     }
 }

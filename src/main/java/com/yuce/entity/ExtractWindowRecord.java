@@ -19,6 +19,9 @@ public class ExtractWindowRecord {
     @TableId(type = IdType.AUTO)
     private Long id;
 
+    @TableField("tbl_id")
+    private Long tblId;
+
     @TableField("alarm_id")
     private String alarmId;
 

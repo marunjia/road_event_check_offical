@@ -15,6 +15,9 @@ public class FrameImageInfo {
     @TableId(value = "id", type = IdType.AUTO)
     private Long id; // 主键ID，自增
 
+    @TableField("tbl_id")
+    private Long tblId;
+
     @TableField("alarm_id")
     private String alarmId; // 关联告警事件ID（外键）
 

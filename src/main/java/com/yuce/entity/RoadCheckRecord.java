@@ -18,6 +18,12 @@ public class RoadCheckRecord {
     private Long id;
 
     /**
+     * 原始告警主键id
+     */
+    @TableField("tbl_id")
+    private Long tblId;
+
+    /**
      * 告警记录ID
      */
     @TableField("alarm_id")
@@ -68,8 +74,14 @@ public class RoadCheckRecord {
     /**
      * 检测区域的坐标点数组（JSON 格式）
      */
-    @TableField("points")
-    private String points;
+    @TableField("original_points")
+    private String originalPoints;
+
+    /**
+     * 检测区域的放大坐标点数组（JSON 格式）
+     */
+    @TableField("scaled_up_points")
+    private String scaledUpPoints;
 
     /**
      * 重叠像素数占比

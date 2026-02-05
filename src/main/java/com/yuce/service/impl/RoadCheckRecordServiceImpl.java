@@ -36,31 +36,25 @@ public class RoadCheckRecordServiceImpl extends ServiceImpl<RoadCheckRecordMappe
     }
 
     /**
-     * @desc 根据key、检测类型、检测结果查询路面检测匹配结果
-     * @param alarmId
-     * @param imagePath
-     * @param videoPath
+     * @desc 根据tblId、检测类型、检测结果查询路面检测匹配结果
+     * @param tblId
      * @param type
      * @param checkFlag
      * @return
      */
-    public List<RoadCheckRecord> getRecordByKeyAndTypeAndFlag(String alarmId, String imagePath, String videoPath, String type, Integer checkFlag){
-        return roadCheckRecordMapper.getRecordByKeyAndTypeAndFlag(alarmId,imagePath,videoPath,type, checkFlag);
+    public List<RoadCheckRecord> getRecordByTblIdAndTypeAndFlag(long tblId, String type, Integer checkFlag){
+        return roadCheckRecordMapper.getRecordByTblIdAndTypeAndFlag(tblId, type, checkFlag);
     }
 
     /**
-     * @desc 根据key和检测类型查询路面检测结果
-     * @param alarmId
-     * @param imagePath
-     * @param videoPath
+     * @desc 根据tblId和检测类型查询路面检测结果
+     * @param tblId
      * @param type
      * @return
      */
-    public List<RoadCheckRecord> getRecordByKeyAndType(String alarmId, String imagePath, String videoPath, String type){
+    public List<RoadCheckRecord> getRecordByTblIdAndType(long tblId, String type){
         QueryWrapper<RoadCheckRecord> queryWrapper = new QueryWrapper<>();
-        queryWrapper.eq("alarm_id", alarmId);
-        queryWrapper.eq("image_path", imagePath);
-        queryWrapper.eq("video_path", videoPath);
+        queryWrapper.eq("tbl_id", tblId);
         queryWrapper.eq("type", type);
         return roadCheckRecordMapper.selectList(queryWrapper);
     }

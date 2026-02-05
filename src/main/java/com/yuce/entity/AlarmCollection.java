@@ -12,9 +12,6 @@ public class AlarmCollection {
     @TableId(type = IdType.AUTO)
     private Integer id; // 自增主键ID
 
-    @TableField("collection_id")
-    private String collectionId; // 告警集ID，UUID格式
-
     @TableField("road_id")
     private String roadId; // 告警集对应道路编码
 
@@ -52,7 +49,10 @@ public class AlarmCollection {
     private Integer collectionStatus; // 告警集状态：1-使用中，2-已关闭
 
     @TableField("person_check_flag")
-    private Integer personCheckFlag; // 人工核查关联是否正确
+    private Integer personCheckFlag; // 0未核查、1是、2否
+
+    @TableField("right_check_num")
+    private Integer rightCheckNum; // 正检告警记录数量
 
     @TableField("person_check_reason")
     private String personCheckReason; // 人工核查关联是否正确

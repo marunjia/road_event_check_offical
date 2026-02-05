@@ -1,5 +1,6 @@
 package com.yuce.service.impl;
 
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.yuce.entity.IndexStatResult;
 import com.yuce.mapper.IndexStatResultMapper;
@@ -7,7 +8,9 @@ import com.yuce.service.IndexStatResultService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 
 /**
  * @ClassName IndexServiceImpl
@@ -30,11 +33,9 @@ public class IndexStatResultServiceImpl extends ServiceImpl<IndexStatResultMappe
      * @return 统计数据列表（包含每日的分子、分母、计算结果）
      */
     @Override
-    public List<IndexStatResult> validAlarmCheckRate() {
-        log.info("查询有效告警检出率");
-        List<IndexStatResult> statList = indexStatResultMapper.validAlarmCheckRate();
-        log.info("查询有效告警检出率 | 数据条数:{}", statList.size());
-        return statList;
+    public boolean insertValidAlarmCheckRate(String statDate) {
+        int rows =  indexStatResultMapper.insertValidAlarmCheckRate(statDate);
+        return rows > 0;
     }
 
     /**
@@ -42,11 +43,9 @@ public class IndexStatResultServiceImpl extends ServiceImpl<IndexStatResultMappe
      * @return 统计数据列表（包含每日的分子、分母、计算结果）
      */
     @Override
-    public List<IndexStatResult> validAlarmCheckRightRate() {
-        log.info("查询有效告警检出准确率");
-        List<IndexStatResult> statList = indexStatResultMapper.validAlarmCheckRightRate();
-        log.info("查询有效告警检出准确率 | 数据条数:{}", statList.size());
-        return statList;
+    public boolean insertValidAlarmCheckRightRate(String statDate) {
+        int rows =   indexStatResultMapper.insertValidAlarmCheckRightRate(statDate);
+        return rows > 0;
     }
 
     /**
@@ -54,11 +53,9 @@ public class IndexStatResultServiceImpl extends ServiceImpl<IndexStatResultMappe
      * @return 统计数据列表（包含每日的分子、分母、计算结果）
      */
     @Override
-    public List<IndexStatResult> errorReportCheckRate() {
-        log.info("查询误检检出率");
-        List<IndexStatResult> statList = indexStatResultMapper.errorReportCheckRate();
-        log.info("查询误检检出率 | 数据条数:{}", statList.size());
-        return statList;
+    public boolean insertErrorReportCheckRate(String statDate) {
+        int rows = indexStatResultMapper.insertErrorReportCheckRate(statDate);
+        return rows > 0;
     }
 
     /**
@@ -66,11 +63,9 @@ public class IndexStatResultServiceImpl extends ServiceImpl<IndexStatResultMappe
      * @return 统计数据列表（包含每日的分子、分母、计算结果）
      */
     @Override
-    public List<IndexStatResult> errorReportCheckRightRate() {
-        log.info("查询误检检出准确率");
-        List<IndexStatResult> statList = indexStatResultMapper.errorReportCheckRightRate();
-        log.info("查询误检检出准确率 | 数据条数:{}", statList.size());
-        return statList;
+    public boolean insertErrorReportCheckRightRate(String statDate) {
+        int rows =  indexStatResultMapper.insertErrorReportCheckRightRate(statDate);
+        return rows > 0;
     }
 
     /**
@@ -78,11 +73,9 @@ public class IndexStatResultServiceImpl extends ServiceImpl<IndexStatResultMappe
      * @return 统计数据列表（包含每日的分子、分母、计算结果）
      */
     @Override
-    public List<IndexStatResult> rightReportCheckRate() {
-        log.info("查询正检检出率");
-        List<IndexStatResult> statList = indexStatResultMapper.rightReportCheckRate();
-        log.info("查询正检检出率 | 数据条数:{}", statList.size());
-        return statList;
+    public boolean insertRightReportCheckRate(String statDate) {
+        int rows =  indexStatResultMapper.insertRightReportCheckRate(statDate);
+        return rows > 0;
     }
 
     /**
@@ -90,10 +83,60 @@ public class IndexStatResultServiceImpl extends ServiceImpl<IndexStatResultMappe
      * @return 统计数据列表（包含每日的分子、分母、计算结果）
      */
     @Override
-    public List<IndexStatResult> rightReportCheckRightRate() {
-        log.info("查询正检检出准确率");
-        List<IndexStatResult> statList = indexStatResultMapper.rightReportCheckRightRate();
-        log.info("查询正检检出准确率 | 数据条数:{}", statList.size());
-        return statList;
+    public boolean insertRightReportCheckRightRate(String statDate) {
+        int rows =  indexStatResultMapper.insertRightReportCheckRightRate(statDate);
+        return rows > 0;
+    }
+
+    /**
+     * 查询告警压缩率
+     * @return 统计数据列表（包含每日的分子、分母、计算结果）
+     */
+    @Override
+    public boolean insertAlarmCompressionRate(String statDate) {
+        int rows =  indexStatResultMapper.insertAlarmCompressionRate(statDate);
+        return rows > 0;
+    }
+
+    /**
+     * 插入交通事件检测转化率
+     * @return 统计数据列表（包含每日的分子、分母、计算结果）
+     */
+    @Override
+    public boolean insertTrafficEventConversionRate(String statDate) {
+        int rows =  indexStatResultMapper.insertTrafficEventConversionRate(statDate);
+        return rows > 0;
+    }
+
+    /**
+     * 插入事件关联跟踪准确率
+     * @return 统计数据列表（包含每日的分子、分母、计算结果）
+     */
+    @Override
+    public boolean insertEventTrackingAccuracy(String statDate) {
+        int rows =  indexStatResultMapper.insertEventTrackingAccuracy(statDate);
+        return rows > 0;
+    }
+
+    /**
+     * @desc 根据指标名称查询数据
+     * @param indexType
+     * @return
+     */
+    public List<IndexStatResult> getIndexByIndexType(Integer indexType) {
+        QueryWrapper<IndexStatResult> queryWrapper = new QueryWrapper<>();
+        queryWrapper.eq("index_type", indexType);
+        queryWrapper.orderByAsc("modify_time");
+        return this.list(queryWrapper);
+    }
+
+    /**
+     * @desc 根据时间区间按照告警类型、初检结果、处置建议统计告警记录条数
+     * @param startTime
+     * @param endTime
+     * @return
+     */
+    public List<Map<String, Object>> getFunnelAnalysis(LocalDateTime startTime, LocalDateTime endTime) {
+        return indexStatResultMapper.getFunnelAnalysis(startTime, endTime);
     }
 }

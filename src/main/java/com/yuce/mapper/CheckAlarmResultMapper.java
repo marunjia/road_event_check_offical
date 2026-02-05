@@ -27,10 +27,8 @@ import java.util.List;
 @Mapper
 public interface CheckAlarmResultMapper extends BaseMapper<CheckAlarmResult> {
 
-    @Select("SELECT * FROM algorithm_check_result WHERE alarm_id = #{alarmId} AND image_path = #{imagePath} AND video_path = #{videoPath} LIMIT 1")
-    CheckAlarmResult getResultByKey(@Param("alarmId") String alarmId,
-                                       @Param("imagePath") String imagePath,
-                                       @Param("videoPath") String videoPath);
+    @Select("SELECT * FROM algorithm_check_result WHERE tbl_id = #{tblId} limit 1")
+    CheckAlarmResult getResultByTblId(@Param("tblId") long tblId);
 
     @Select("SELECT t2.device_id \n" +
             "    FROM (\n" +

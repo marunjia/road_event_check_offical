@@ -1,5 +1,6 @@
 CREATE TABLE `extract_point_record` (
     `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+    `tbl_id` bigint(20) NOT NULL COMMENT '告警记录唯一标识',
     `alarm_id` varchar(255) NOT NULL COMMENT '告警id',
     `image_path` varchar(255) NOT NULL COMMENT '图片路径',
     `video_path` varchar(255) NOT NULL COMMENT '视频路径',
@@ -13,5 +14,6 @@ CREATE TABLE `extract_point_record` (
     `create_time` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     `modify_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
     PRIMARY KEY (`id`),
+    KEY `idx_tbl_id` (`tbl_id`),
     KEY `idx_alarm_id` (`alarm_id`)
-) ENGINE=InnoDB AUTO_INCREMENT=70730 DEFAULT CHARSET=utf8mb4 COMMENT='图片检测框记录表'
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='图片检测框记录表'

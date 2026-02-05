@@ -5,22 +5,16 @@ import com.alibaba.fastjson.JSONObject;
 import com.yuce.entity.*;
 import com.yuce.mapper.CheckAlarmProcessMapper;
 import com.yuce.mapper.CheckAlarmResultMapper;
-import com.yuce.mapper.ExtractWindowMapper;
 import com.yuce.mapper.FeatureElementMapper;
-import com.yuce.mapper.OriginalAlarmMapper;
 import com.yuce.mapper.RoadCheckRecordMapper;
-import com.yuce.util.IouUtil;
+import com.yuce.service.impl.FeatureElementServiceImpl;
+import com.yuce.util.FlagTagUtil;
 import com.yuce.util.RoadIntersectionUtil;
-import lombok.AccessLevel;
-import lombok.NoArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
-import java.time.Duration;
-import java.time.LocalDateTime;
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -36,79 +30,6 @@ import java.util.Set;
 @Slf4j
 public class FeatureElementAlgorithm {
 
-    // ------------------------------ 常量定义（内部静态类封装，便于维护） ------------------------------
-    @NoArgsConstructor(access = AccessLevel.PRIVATE)
-    public static class ElementConstant {
-        /** 人员类型清单 */
-        public static final List<String> PERSON_LIST = new ArrayList<String>() {{
-            add("person");
-            add("traffic_police");
-            add("medical_person");
-            add("builder");
-        }};
-
-        /** 施救力量清单 */
-        public static final List<String> RESCUE_LIST = new ArrayList<String>() {{
-            add("anti_collision_vehicle");
-            add("maintenance_construction_vehicle");
-            add("police_car");
-            add("ambulance");
-            add("fire_fighting_truck");
-            add("traffic_police");
-            add("medical_person");
-            add("builder");
-        }};
-
-        /** 忽略的车辆类型（无需处理） */
-        public static final List<String> IGNORE_VEHICLE_LIST = new ArrayList<String>() {{
-            add("anti_collision_vehicle");
-            add("maintenance_construction_vehicle");
-            add("police_car");
-            add("ambulance");
-            add("fire_fighting_truck");
-        }};
-
-        /** 忽略的人员类型（无需处理） */
-        public static final List<String> IGNORE_PERSON_LIST = new ArrayList<String>() {{
-            add("medical_person");
-            add("builder");
-            add("traffic_police");
-        }};
-
-        /** 忽略的抛洒物类型（无需处理） */
-        public static final List<String> IGNORE_PSW_LIST = new ArrayList<String>() {{
-            add("paper");
-            add("plastic bags");
-            add("plastic");
-            add("cardboard");
-            add("warning triangle");
-        }};
-
-        /** 处置建议：无法判断 */
-        public static final int ADVICE_UNDETERMINED = 0;
-        /** 处置建议：疑似误报 */
-        public static final int ADVICE_FALSE_ALARM = 1;
-        /** 处置建议：尽快确认 */
-        public static final int ADVICE_CONFIRM = 2;
-        /** 处置建议：无需处理（含重复告警） */
-        public static final int ADVICE_NO_NEED = 3;
-
-        /** 初检结果：无法判断 */
-        public static final int CHECK_FLAG_UNDETERMINED = 0;
-        /** 初检结果：疑似误报 */
-        public static final int CHECK_FLAG_FALSE_ALARM = 1;
-        /** 初检结果：正检（需进一步判定） */
-        public static final int CHECK_FLAG_POSITIVE = 2;
-
-        /** 拥堵判定阈值：满足条件的图片数量 */
-        public static final int CONGESTION_IMG_THRESHOLD = 2;
-        /** 路面占比阈值：判定拥堵的面积占比 */
-        public static final double ROAD_AREA_THRESHOLD = 0.7;
-        /** 车道占用阈值：判定占道的百分比 */
-        public static final double LANE_OCCUPY_THRESHOLD = 0.1;
-    }
-
-
     // ------------------------------ 依赖注入 ------------------------------
     @Autowired
     private CheckAlarmProcessMapper checkAlarmProcessMapper;
@@ -117,106 +38,114 @@ public class FeatureElementAlgorithm {
     private CheckAlarmResultMapper checkAlarmResultMapper;
 
     @Autowired
-    private ExtractWindowMapper extractWindowMapper;
-
-    @Autowired
-    private OriginalAlarmMapper originalAlarmMapper;
-
-    @Autowired
     private FeatureElementMapper featureElementMapper;
 
     @Autowired
     private RoadCheckRecordMapper roadCheckRecordMapper;
+
+    @Autowired
+    private FeatureElementServiceImpl featureElementServiceImpl;
 
 
     // ------------------------------ 核心业务方法 ------------------------------
     /**
      * 特征要素处理（模型算法逻辑）：基于检测结果提取告警特征，生成处置建议
      */
-    public void featureElementDealByAlgo(OriginalAlarmRecord record) {
-        // 1. 提取核心字段，校验非空
+    public boolean featureElementDealByAlgo(OriginalAlarmRecord record) {
+        // 提取核心字段，校验非空
+        long tblId = record.getTblId();
         String alarmId = record.getId();
         String imagePath = record.getImagePath();
         String videoPath = record.getVideoPath();
-        if (!validateCoreFields(alarmId, imagePath, videoPath)) {
-            return;
+
+        // 重复处理校验（避免重复入库）
+        if (featureElementServiceImpl.isExistByTblId(tblId)) {
+            log.info("告警记录完成特征要素,不再处理 | tblId:{} | alarmId:{} | imagePath:{} | videoPath:{}", tblId, alarmId, imagePath, videoPath);
+            return true;
         }
 
-        // 2. 重复处理校验（避免重复入库）
-        if (isFeatureProcessed(alarmId, imagePath, videoPath)) {
-            log.info("告警记录特征要素已处理，跳过 | alarmId:{} | imagePath:{} | videoPath:{}", alarmId, imagePath, videoPath);
-            return;
+        // 填充特征要素属性值
+        CheckAlarmResult checkResult = checkAlarmResultMapper.getResultByTblId(tblId);
+        if (checkResult == null) {
+            log.info("自研算法_缺失算法初检结果，无法进行后续处理 | tblId:{} | alarmId:{} | imagePath:{} | videoPath:{}", tblId, alarmId, imagePath, videoPath);
+            return false;
         }
+        int checkFlag = checkResult.getCheckFlag();
 
-        // 3. 初始化特征要素记录（基础字段赋值）
+        // 创建特征要素基础对象
         FeatureElementRecord featureRecord = initFeatureRecord(record);
 
-        try {
-            // 4. 查询依赖数据（初检结果、TOP1检测物体、所有检测物体）
-            CheckAlarmResult checkResult = checkAlarmResultMapper.getResultByKey(alarmId, imagePath, videoPath);
-            int checkFlag = (checkResult != null) ? checkResult.getCheckFlag() : ElementConstant.CHECK_FLAG_UNDETERMINED;
-
-            CheckAlarmProcess top1Process = checkAlarmProcessMapper.getIouTop1ByKey(alarmId, imagePath, videoPath);
-            List<CheckAlarmProcess> allProcessList = checkAlarmProcessMapper.getListByKey(alarmId, imagePath, videoPath);
-
-            // 5. 有检测结果时，提取特征；无结果时用默认值
-            if (top1Process != null && !CollectionUtils.isEmpty(allProcessList)) {
-                // 5.1 提取基础特征（告警物体、周边物体、救援力量）
-                extractBaseFeatures(featureRecord, alarmId, imagePath, videoPath, top1Process, allProcessList);
-
-                // 5.2 提取场景特征（拥堵状态、车道占用）
-                extractSceneFeatures(featureRecord, alarmId, imagePath, videoPath, allProcessList);
-
-                // 5.3 提取涉事对象特征（车辆/人员）
-                extractInvolvedFeatures(featureRecord, record.getEventType(), top1Process, allProcessList);
-
-                // 5.4 生成处置建议
-                Map<String, Object> adviceMap = getAdviceInfo(record, checkFlag, record.getEventType(), top1Process.getName());
-                featureRecord.setDisposalAdvice((Integer) adviceMap.get("disposalAdvice"));
-                featureRecord.setAdviceReason((String) adviceMap.get("adviceReason"));
-
-            } else {
-                // 无检测结果时，设置默认值
-                setDefaultFeatureValues(featureRecord);
-                log.warn("告警记录无检测结果，使用默认特征值 | alarmId:{} | imagePath:{} | videoPath:{}", alarmId, imagePath, videoPath);
-            }
-
-            // 6. 入库特征记录
-            featureElementMapper.insert(featureRecord);
-            log.info("告警记录特征要素处理完成，已入库 | alarmId:{} | imagePath:{} | videoPath:{} | featureRecord:{}",  alarmId, imagePath, videoPath, JSON.toJSONString(featureRecord));
-        } catch (Exception e) {
-            log.error("特征要素处理异常 | alarmId:{} | imagePath:{} | videoPath:{}",
-                    alarmId, imagePath, videoPath, e);
-            // 异常时仍入库（避免后续重复处理失败），标记异常原因
-            featureRecord.setAdviceReason("特征处理异常：" + e.getMessage());
-            featureElementMapper.insert(featureRecord);
+        // 设置目标物体名称属性
+        CheckAlarmProcess top1Process = checkAlarmProcessMapper.getIouTop1ByTblId(tblId);
+        if (top1Process == null) {
+            log.info("自研算法_缺失算法初检过程，物体检测相关属性默认为null：tblId:{} | alarmId:{} | imagePath:{} | videoPath:{}", tblId, alarmId, imagePath, videoPath);
+            featureRecord.setAlarmElement(""); //设置告警物体名称
+        }else{
+            featureRecord.setAlarmElement(top1Process.getName());
         }
+
+        // 设置告警物体周边物体、救援力量、拥堵状态、车道占用、涉事车辆、涉事人员属性
+        List<CheckAlarmProcess> allProcessList = checkAlarmProcessMapper.getListByTblId(tblId);
+        if (CollectionUtils.isEmpty(allProcessList)) {
+            log.info("自研算法_缺失检测物体列表，物体检测相关属性默认为null：tblId:{} | alarmId:{} | imagePath:{} | videoPath:{}", tblId, alarmId, imagePath, videoPath);
+            featureRecord.setAlarmElementRange("");
+            featureRecord.setRescueForce("");
+            featureRecord.setCongestionStatus(0);
+            featureRecord.setLaneOccupyInfo("");
+        }else {
+            // 周边物体（按imageId分组的物体数量）
+            List<Map<String, Integer>> elementRangeList = checkAlarmProcessMapper.getElementGroupByKey(
+                    alarmId, imagePath, videoPath, top1Process.getImageId(), top1Process.getId().intValue()
+            );
+            featureRecord.setAlarmElementRange(JSON.toJSONString(elementRangeList));
+
+            // 救援力量（循环提取）
+            Set<String> rescueSet = new HashSet<>();
+            for (CheckAlarmProcess process : allProcessList) {
+                String name = process.getName();
+                if (FlagTagUtil.ElementConstant.RESCUE_LIST.contains(name)) {
+                    rescueSet.add(name);
+                }
+            }
+            featureRecord.setRescueForce(StringUtils.collectionToCommaDelimitedString(rescueSet));
+
+            // 提取场景特征（拥堵状态、车道占用）
+            extractSceneFeatures(featureRecord, alarmId, imagePath, videoPath, allProcessList);
+
+            // 提取涉事对象特征（车辆/人员）
+            extractInvolvedFeatures(featureRecord, record.getEventType(), top1Process, allProcessList);
+        }
+
+        // 生成处置建议
+        Map<String, Object> adviceMap = getAdviceInfo(record, checkFlag, top1Process.getName());
+        featureRecord.setDisposalAdvice((Integer) adviceMap.get("disposalAdvice"));
+        featureRecord.setAdviceReason((String) adviceMap.get("adviceReason"));
+
+        log.info("告警记录完成特征要素： tblId:{} | alarmId:{} | imagePath:{} | videoPath:{}", tblId, alarmId, imagePath, videoPath);
+
+        featureElementMapper.insert(featureRecord);
+        return true;
     }
 
     /**
      * 特征要素处理（通用算法逻辑）：基于人工/通用规则提取特征，生成处置建议
      */
-    public void featureElementDealByGen(OriginalAlarmRecord record, int checkFlag, String reason) {
+    public void featureElementDealByGen(OriginalAlarmRecord record, int checkFlag) {
         // 1. 提取核心字段，校验非空
+        long tblId = record.getTblId();
         String alarmId = record.getId();
         String imagePath = record.getImagePath();
         String videoPath = record.getVideoPath();
-        if (!validateCoreFields(alarmId, imagePath, videoPath)) {
-            return;
-        }
 
         // 2. 重复处理校验
-        if (isFeatureProcessed(alarmId, imagePath, videoPath)) {
-            log.info("告警记录特征要素已处理，跳过 | alarmId:{} | imagePath:{} | videoPath:{}", alarmId, imagePath, videoPath);
-            return;
-        }
+        if (featureElementServiceImpl.isExistByTblId(tblId)) {
+            log.info("告警记录已完成特征要素,不再处理 | tblId:{} | alarmId:{} | imagePath:{} | videoPath:{}", tblId, alarmId, imagePath, videoPath);
+        }else{
+            // 3. 初始化基础属性字段
+            FeatureElementRecord featureRecord = initFeatureRecord(record);
 
-        // 3. 初始化特征记录（基础字段赋值）
-        FeatureElementRecord featureRecord = initFeatureRecord(record);
-
-        try {
-            // 4. 通用逻辑：仅设置基础字段和处置建议，无检测相关特征
-            featureRecord.setInvolvedPersonInfo(record.getWeather()); // 注意：原逻辑将天气存入人员信息字段，建议确认是否为笔误
+            // 4. 填充算法检测字段
+            featureRecord.setWeatherCondition(record.getWeather());
             featureRecord.setLaneOccupyInfo(null);
             featureRecord.setCongestionStatus(null);
             featureRecord.setDangerElement(null);
@@ -227,51 +156,13 @@ public class FeatureElementAlgorithm {
             featureRecord.setAlarmElementRange(null);
 
             // 5. 生成处置建议
-            Map<String, Object> adviceMap = getAdviceInfo(record, checkFlag, record.getEventType(), "");
-            featureRecord.setDisposalAdvice((Integer) adviceMap.get("disposalAdvice"));
-            featureRecord.setAdviceReason(reason); // 外部传入的原因
+            Map<String, Object> adviceMap = getAdviceInfo(record, checkFlag, "");
+            featureRecord.setDisposalAdvice((Integer)(adviceMap.get("disposalAdvice")));
+            featureRecord.setAdviceReason(String.valueOf(adviceMap.get("adviceReason")));
 
             // 6. 入库
-            featureElementMapper.insert(featureRecord);
-            log.info("告警记录通用特征处理完成，已入库 | alarmId:{} | imagePath:{} | videoPath:{}", alarmId, imagePath, videoPath);
-
-        } catch (Exception e) {
-            log.error("通用特征要素处理异常 | alarmId:{} | imagePath:{} | videoPath:{}，异常详情：", alarmId, imagePath, videoPath, e);
-            featureRecord.setAdviceReason("通用处理异常：" + e.getMessage());
-            featureElementMapper.insert(featureRecord);
-        }
-    }
-
-
-    // ------------------------------ 私有工具方法 ------------------------------
-    /**
-     * 校验核心字段非空（alarmId、imagePath、videoPath）
-     */
-    private boolean validateCoreFields(String alarmId, String imagePath, String videoPath) {
-        if (StringUtils.isEmpty(alarmId)) {
-            log.error("告警ID为空，终止特征处理");
-            return false;
-        }
-        if (StringUtils.isEmpty(imagePath)) {
-            log.error("图片路径为空，终止特征处理 | alarmId:{} | imagePath:{} | videoPath:{}", alarmId, imagePath, videoPath);
-            return false;
-        }
-        if (StringUtils.isEmpty(videoPath)) {
-            log.error("视频路径为空，终止特征处理 | alarmId:{} | imagePath:{} | videoPath:{}", alarmId, imagePath, videoPath);
-            return false;
-        }
-        return true;
-    }
-
-    /**
-     * 检查特征要素是否已处理（避免重复入库）
-     */
-    private boolean isFeatureProcessed(String alarmId, String imagePath, String videoPath) {
-        try {
-            return featureElementMapper.getFeatureByKey(alarmId, imagePath, videoPath) != null;
-        } catch (Exception e) {
-            log.error("查询特征处理状态异常，默认判定为未处理 | alarmId:{} | imagePath:{} | videoPath:{}", alarmId, imagePath, videoPath, e);
-            return false;
+            featureElementServiceImpl.save(featureRecord);
+            log.info("告警记录完成特征要素 | tblId:{} | alarmId:{} | imagePath:{} | videoPath:{}", tblId, alarmId, imagePath, videoPath);
         }
     }
 
@@ -280,6 +171,7 @@ public class FeatureElementAlgorithm {
      */
     private FeatureElementRecord initFeatureRecord(OriginalAlarmRecord record) {
         FeatureElementRecord featureRecord = new FeatureElementRecord();
+        featureRecord.setTblId(record.getTblId());
         featureRecord.setAlarmId(record.getId());
         featureRecord.setImagePath(record.getImagePath());
         featureRecord.setVideoPath(record.getVideoPath());
@@ -291,32 +183,6 @@ public class FeatureElementAlgorithm {
         return featureRecord;
     }
 
-    /**
-     * 提取基础特征：告警物体、周边物体、救援力量
-     */
-    private void extractBaseFeatures(FeatureElementRecord featureRecord, String alarmId, String imagePath, String videoPath,
-                                     CheckAlarmProcess top1Process, List<CheckAlarmProcess> allProcessList) {
-        // 1. 告警物体（TOP1检测物体）
-        String top1Name = top1Process.getName();
-        featureRecord.setAlarmElement(top1Name);
-
-        // 2. 周边物体（按imageId分组的物体数量）
-        List<Map<String, Integer>> elementRangeList = checkAlarmProcessMapper.getElementGroupByKey(
-                alarmId, imagePath, videoPath, top1Process.getImageId(), top1Process.getId().intValue()
-        );
-        featureRecord.setAlarmElementRange(JSON.toJSONString(elementRangeList));
-
-        // 3. 救援力量（循环提取）
-        Set<String> rescueSet = new HashSet<>();
-        for (CheckAlarmProcess process : allProcessList) {
-            String name = process.getName();
-            if (ElementConstant.RESCUE_LIST.contains(name)) {
-                rescueSet.add(name);
-            }
-        }
-        featureRecord.setRescueForce(StringUtils.collectionToCommaDelimitedString(rescueSet));
-        log.debug("告警记录提取救援力量 | alarmId:{} | rescueSet:{}", alarmId, rescueSet);
-    }
 
     /**
      * 提取场景特征：拥堵状态、车道占用
@@ -349,15 +215,15 @@ public class FeatureElementAlgorithm {
         int over70AreaImgCount = 0;
         if (totalRoadArea > 0) {
             for (Integer area : vehicleAreaMap.values()) {
-                if (area > totalRoadArea * ElementConstant.ROAD_AREA_THRESHOLD) {
+                if (area > totalRoadArea * FlagTagUtil.ROAD_AREA_THRESHOLD) {
                     over70AreaImgCount++;
                 }
             }
         }
 
         // 1.5 判定拥堵
-        int congestionStatus = (over10VehicleImgCount >= ElementConstant.CONGESTION_IMG_THRESHOLD
-                && over70AreaImgCount >= ElementConstant.CONGESTION_IMG_THRESHOLD) ? 1 : 0;
+        int congestionStatus = (over10VehicleImgCount >= FlagTagUtil.CONGESTION_IMG_THRESHOLD
+                && over70AreaImgCount >= FlagTagUtil.CONGESTION_IMG_THRESHOLD) ? 1 : 0;
         featureRecord.setCongestionStatus(congestionStatus);
         log.debug("告警记录拥堵判定 | alarmId:{} | 车辆超限图片数:{} | 面积超限图片数:{} | 拥堵状态:{}",
                 alarmId, over10VehicleImgCount, over70AreaImgCount, congestionStatus);
@@ -398,7 +264,7 @@ public class FeatureElementAlgorithm {
                 Set<String> personSet = new HashSet<>();
                 for (CheckAlarmProcess process : allProcessList) {
                     String name = process.getName();
-                    if (ElementConstant.PERSON_LIST.contains(name)) {
+                    if (FlagTagUtil.ElementConstant.PERSON_LIST.contains(name)) {
                         personSet.add(name);
                     }
                 }
@@ -418,8 +284,7 @@ public class FeatureElementAlgorithm {
      * 计算路面总面积（从RoadCheckRecord中累加）
      */
     private double calculateTotalRoadArea(String alarmId, String imagePath, String videoPath) {
-        List<RoadCheckRecord> roadCheckList = roadCheckRecordMapper.getRecordByKeyAndType(
-                alarmId, imagePath, videoPath, "road");
+        List<RoadCheckRecord> roadCheckList = roadCheckRecordMapper.getRecordByKeyAndType(alarmId, imagePath, videoPath, "road");
         if (CollectionUtils.isEmpty(roadCheckList)) {
             log.debug("未查询到路面检测记录，总面积为0 | alarmId:{}", alarmId);
             return 0.0;
@@ -427,7 +292,7 @@ public class FeatureElementAlgorithm {
 
         double totalArea = 0.0;
         for (RoadCheckRecord roadRecord : roadCheckList) {
-            totalArea += RoadIntersectionUtil.calculatePolygonArea(roadRecord.getPoints());
+            totalArea += RoadIntersectionUtil.calculatePolygonArea(roadRecord.getScaledUpPoints());
         }
         return totalArea;
     }
@@ -465,7 +330,7 @@ public class FeatureElementAlgorithm {
 
         int count = 0;
         for (RoadCheckRecord lane : laneList) {
-            if (lane.getPercent() >= ElementConstant.LANE_OCCUPY_THRESHOLD) {
+            if (lane.getPercent() >= FlagTagUtil.LANE_OCCUPY_THRESHOLD) {
                 count++;
             }
         }
@@ -481,104 +346,35 @@ public class FeatureElementAlgorithm {
         featureRecord.setInvolvedVehicleInfo(null);
         featureRecord.setInvolvedPersonInfo(null);
         featureRecord.setRescueForce(null);
-        featureRecord.setDisposalAdvice(ElementConstant.ADVICE_UNDETERMINED);
+        featureRecord.setDisposalAdvice(FlagTagUtil.ADVICE_UNDETERMINED);
         featureRecord.setAdviceReason("算法未检测到目标");
         featureRecord.setCongestionStatus(null);
         featureRecord.setLaneOccupyInfo(null);
     }
 
     /**
-     * 重复告警场景处理建议
+     * 获取处理建议
+     *  初检结果为0：
+     *      处置建议为无法判断
+     *  初检结果为1：
+     *      判断物体是否无需处理类型
+     *          --是：处置建议为无需处理
+     *          --否：暂不赋值，待告警集完成后再进行判定
+     *  初检结果为2：
+     *      处置建议为疑似误报
      */
-    public Map<String, Object> getAdviceFlagRepeat(OriginalAlarmRecord record, String name) {
-        Map<String, Object> map = new HashMap<>();
-        String alarmId = record.getId();
-        String imagePath = record.getImagePath();
-        String videoPath = record.getVideoPath();
-        String eventType = record.getEventType();
-        String deviceId = record.getDeviceId();
-        LocalDateTime alarmTime = record.getAlarmTime();
-
-        // 查询当前告警记录坐标框
-        ExtractWindowRecord extractWindowRecord = extractWindowMapper.getWindowByKey(alarmId, imagePath, videoPath);
-        if (extractWindowRecord == null) {
-            log.debug("当前告警无提框记录，无法判定重复 | alarmId:{}", alarmId);
-            return null;
-        }
-
-        // 查询同点位上一条异常事件
-        OriginalAlarmRecord leadOriginalAlarmRecord = originalAlarmMapper.getLastByDeviceAndType(
-                deviceId, eventType, alarmTime);
-        if (leadOriginalAlarmRecord == null) {
-            log.debug("无上条告警记录，无法判定重复 | alarmId:{}", alarmId);
-            return null;
-        }
-
-        String leadAlarmId = leadOriginalAlarmRecord.getId();
-        String leadImagePath = leadOriginalAlarmRecord.getImagePath();
-        String leadVideoPath = leadOriginalAlarmRecord.getVideoPath();
-
-        // 查询上条告警的TOP1检测结果
-        CheckAlarmProcess leadCheckAlarmProcess = checkAlarmProcessMapper.getIouTop1ByKey(
-                leadAlarmId, leadImagePath, leadVideoPath);
-        if (leadCheckAlarmProcess == null) {
-            log.debug("上条告警无检测结果，无法判定重复 | alarmId:{} | 上条alarmId:{}", alarmId, leadAlarmId);
-            return null;
-        }
-
-        // 查询上条告警的坐标框
-        ExtractWindowRecord leadExtractWindowRecord = extractWindowMapper.getWindowByKey(
-                leadAlarmId, leadImagePath, leadVideoPath);
-        if (leadExtractWindowRecord == null) {
-            log.debug("上条告警无提框记录，无法判定重复 | alarmId:{} | 上条alarmId:{}", alarmId, leadAlarmId);
-            return null;
-        }
-
-        // 计算IOU和时间间隔
-        double iou = IouUtil.calculateIoU(
-                extractWindowRecord.getPoint1X(), extractWindowRecord.getPoint1Y(),
-                extractWindowRecord.getPoint2X(), extractWindowRecord.getPoint2Y(),
-                leadExtractWindowRecord.getPoint1X(), leadExtractWindowRecord.getPoint1Y(),
-                leadExtractWindowRecord.getPoint2X(), leadExtractWindowRecord.getPoint2Y()
-        );
-        long minutes = Duration.between(alarmTime, leadOriginalAlarmRecord.getAlarmTime()).toMinutes();
-        log.debug("重复告警判定 | alarmId:{} | 上条alarmId:{} | IOU:{} | 间隔分钟:{}",
-                alarmId, leadAlarmId, iou, minutes);
-
-        // 重复告警判定规则
-        boolean isRepeat = false;
-        if (eventType.equals("停驶")) {
-            isRepeat = name.equals(leadCheckAlarmProcess.getName()) && iou >= 0.5 && minutes <= 10;
-        } else if (eventType.equals("行人")) {
-            isRepeat = name.equals(leadCheckAlarmProcess.getName()) && minutes <= 15;
-        } else if (eventType.equals("抛洒物")) {
-            isRepeat = (name.equals(leadCheckAlarmProcess.getName()) && minutes <= 60)
-                    || (name.equals(leadCheckAlarmProcess.getName()) && minutes > 60 && minutes <= 1440 && iou >= 0.7)
-                    || (minutes > 1440);
-        }
-
-        if (isRepeat) {
-            map.put("disposalAdvice", ElementConstant.ADVICE_NO_NEED);
-            map.put("adviceReason", "重复告警");
-            return map;
-        }
-        return null;
-    }
-
-    /**
-     * 获取通用算法处理建议
-     */
-    public Map<String, Object> getAdviceInfo(OriginalAlarmRecord record, int checkFlag, String eventType, String name) {
-        int disposalAdvice = ElementConstant.ADVICE_UNDETERMINED;
+    public Map<String, Object> getAdviceInfo(OriginalAlarmRecord record, int checkFlag, String name) {
+        int disposalAdvice = FlagTagUtil.ADVICE_UNDETERMINED;
         String adviceReason = "";
         Map<String, Object> map = new HashMap<>();
 
-        // 处置建议规则
-        if (checkFlag == ElementConstant.CHECK_FLAG_UNDETERMINED) {
-            disposalAdvice = ElementConstant.ADVICE_UNDETERMINED;
-            adviceReason = "异常情况，请联系开发查看";
-        } else if (checkFlag == ElementConstant.CHECK_FLAG_FALSE_ALARM) {
-            disposalAdvice = ElementConstant.ADVICE_FALSE_ALARM;
+        String eventType = record.getEventType();
+
+        if(checkFlag == 0){
+            disposalAdvice = FlagTagUtil.ADVICE_UNDETERMINED;
+            adviceReason = "算法检测前置数据异常";
+        }else if (checkFlag == 2) {
+            disposalAdvice = FlagTagUtil.ADVICE_FALSE_ALARM;
             if (eventType.equals("停驶")) {
                 adviceReason = "物体类型非车辆";
             } else if (eventType.equals("行人")) {
@@ -588,10 +384,10 @@ public class FeatureElementAlgorithm {
             } else {
                 adviceReason = "物体类型异常";
             }
-        } else if (checkFlag == ElementConstant.CHECK_FLAG_POSITIVE) {
-            // 无需处理类型检测
-            if (ElementConstant.IGNORE_VEHICLE_LIST.contains(name)) {
-                disposalAdvice = ElementConstant.ADVICE_NO_NEED;
+        }else if(checkFlag == 1){
+            //无需处理对象
+            if (FlagTagUtil.ElementConstant.IGNORE_VEHICLE_LIST.contains(name)) {
+                disposalAdvice = FlagTagUtil.ADVICE_NO_NEED;
                 if (name.equals("ambulance") || name.equals("fire_fighting_truck")) {
                     adviceReason = "应急救援";
                 } else if (name.equals("police_car")) {
@@ -599,8 +395,8 @@ public class FeatureElementAlgorithm {
                 } else if (name.equals("anti_collision_vehicle") || name.equals("maintenance_construction_vehicle")) {
                     adviceReason = "道路作业(短期/持续性作业)";
                 }
-            } else if (ElementConstant.IGNORE_PERSON_LIST.contains(name)) {
-                disposalAdvice = ElementConstant.ADVICE_NO_NEED;
+            } else if (FlagTagUtil.ElementConstant.IGNORE_PERSON_LIST.contains(name)) {
+                disposalAdvice = FlagTagUtil.ADVICE_NO_NEED;
                 if (name.equals("medical_person")) {
                     adviceReason = "应急救援";
                 } else if (name.equals("traffic_police")) {
@@ -608,24 +404,14 @@ public class FeatureElementAlgorithm {
                 } else if (name.equals("builder")) {
                     adviceReason = "道路作业(短期/持续性作业)";
                 }
-            } else if (ElementConstant.IGNORE_PSW_LIST.contains(name)) {
-                disposalAdvice = ElementConstant.ADVICE_NO_NEED;
+            } else if (FlagTagUtil.ElementConstant.IGNORE_PSW_LIST.contains(name)) {
+                disposalAdvice = FlagTagUtil.ADVICE_NO_NEED;
                 adviceReason = "不影响通行的小抛洒物";
-            } else {
-                // 重复告警检测
-                Map<String, Object> repeatMap = getAdviceFlagRepeat(record, name);
-                if (repeatMap != null) {
-                    return repeatMap;
-                } else {
-                    disposalAdvice = ElementConstant.ADVICE_CONFIRM;
-                    adviceReason = "";
-                }
+            } else{
+                disposalAdvice = FlagTagUtil.ADVICE_TMP_WAIT;
+                adviceReason = "需等待告警集处理";
             }
-        } else {
-            disposalAdvice = ElementConstant.ADVICE_CONFIRM;
-            adviceReason = "";
         }
-
         map.put("disposalAdvice", disposalAdvice);
         map.put("adviceReason", adviceReason);
         log.info("处置建议生成 | alarmId:{} | advice:{} | reason:{}", record.getId(), disposalAdvice, adviceReason);

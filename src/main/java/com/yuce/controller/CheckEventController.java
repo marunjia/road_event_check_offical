@@ -53,6 +53,9 @@ public class CheckEventController {
     private CheckAlarmResultServiceImpl checkAlarmResultServiceImpl;
 
     @Autowired
+    private CheckResultAlgorithm checkResultAlgorithm;
+
+    @Autowired
     private OriginalAlarmServiceImpl originalAlarmServiceImpl;
 
     @Autowired
@@ -70,8 +73,8 @@ public class CheckEventController {
     @GetMapping
     public ApiResponse<IPage<QueryResultCheckRecord>> list(
             @RequestParam(required = false) String alarmId,
-            @RequestParam(required = false) String startDate,//yyyy-MM-dd格式
-            @RequestParam(required = false) String endDate,//yyyy-MM-dd格式
+            @RequestParam(required = false) String startDate,//yyyy-MM-dd HH:mm:ss
+            @RequestParam(required = false) String endDate,//yyyy-MM-dd HH:mm:ss
             @RequestParam(required = false) String deviceName,
             @RequestParam(required = false) String roadId,
             @RequestParam(required = false) String directionDes,
@@ -133,6 +136,7 @@ public class CheckEventController {
                 JSONObject point2 = pointsJsonArray.getJSONObject(1);
 
                 CheckAlarmProcess checkAlarmProcess = new CheckAlarmProcess();
+                checkAlarmProcess.setTblId(tblId);
                 checkAlarmProcess.setAlarmId(alarmId);
                 checkAlarmProcess.setImageId(imageId);
                 checkAlarmProcess.setImagePath(imagePath);
@@ -162,6 +166,7 @@ public class CheckEventController {
         } else {
             // data 为空也需要保存记录
             CheckAlarmProcess checkAlarmProcess = new CheckAlarmProcess();
+            checkAlarmProcess.setTblId(tblId);
             checkAlarmProcess.setAlarmId(alarmId);
             checkAlarmProcess.setImageId(imageId);
             checkAlarmProcess.setImagePath(imagePath);
@@ -185,10 +190,10 @@ public class CheckEventController {
 
         //查询算法处理的图片数量
         int count = checkAlarmProcessServiceImpl.countDistinctImageId(alarmId, imagePath, videoPath);//根据联合主键查询已检测的图片数量
-        log.info("抛洒物回调(paosawu callBack)：alarmId->{}, imagePath->{}, videoPath->{}, checkImageNum->{}, frameCount->{}", alarmId, imagePath, videoPath, count, frameCount);
+        log.info("抛洒物回调写入检测结果：tblId:{} | alarmId:{} | imagePath:{} | videoPath:{}, checkImageNum:{} | frameCount:{}", alarmId, imagePath, videoPath, count, frameCount);
         if (count == frameCount) {
-            log.info("抛洒物算法处理完成(paosawu callBack complete)：alarmId->{}, imagePath->{}, videoPath->{}", alarmId, imagePath, videoPath);
-            checkAlarmResultServiceImpl.checkResultByIou(record, 0.2, 1);//更新算法结果:只要有一张图片核检成功即认为为正检；
+            log.info("抛洒物算法处理完成：tblId:{} | alarmId->{} | imagePath->{} | videoPath:{}", tblId, alarmId, imagePath, videoPath);
+            checkResultAlgorithm.checkResultDealByAlgo(record);//更新算法结果:只要有一张图片核检成功即认为为正检；
             featureElementAlgorithm.featureElementDealByAlgo(record);//处理特征要素
             alarmCollectionAlgorithm.collectionDeal(record);//处理告警集
             collectionGroupAlgorithm.groupDeal(record);//告警组判定

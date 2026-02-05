@@ -87,12 +87,9 @@ public class PswAlgorithm {
         String alarmId = record.getId();
         String imagePath = record.getImagePath();
         String videoPath = record.getVideoPath();
-        if (!validateCoreFields(alarmId, imagePath, videoPath, tblId)) {
-            return false;
-        }
 
         // 2. 检查是否已处理（避免重复调用接口和数据冗余）
-        if (isAlreadyProcessed(alarmId, imagePath, videoPath)) {
+        if (isAlreadyProcessed(tblId)) {
             log.info("抛洒物算法已处理，跳过 | tblId:{} | alarmId:{} | imagePath:{}",
                     tblId, alarmId, imagePath);
             return true;
@@ -118,40 +115,15 @@ public class PswAlgorithm {
         }
     }
 
-
-    // ------------------------------ 私有工具方法（单一职责，提高可读性） ------------------------------
-    /**
-     * 校验核心字段非空（避免空指针异常）
-     */
-    private boolean validateCoreFields(String alarmId, String imagePath, String videoPath, Long tblId) {
-        if (!StringUtils.hasText(alarmId)) {
-            log.error("抛洒物算法处理失败：alarmId为空");
-            return false;
-        }
-        if (!StringUtils.hasText(imagePath)) {
-            log.error("抛洒物算法处理失败：imagePath为空 | alarmId:{}", alarmId);
-            return false;
-        }
-        if (!StringUtils.hasText(videoPath)) {
-            log.error("抛洒物算法处理失败：videoPath为空 | alarmId:{} | imagePath:{}", alarmId, imagePath);
-            return false;
-        }
-        if (tblId == null || tblId <= 0) {
-            log.error("抛洒物算法处理失败：tblId非法（必须大于0） | alarmId:{}", alarmId);
-            return false;
-        }
-        return true;
-    }
-
     /**
      * 检查告警是否已处理（通过查询检测结果判断）
      */
-    private boolean isAlreadyProcessed(String alarmId, String imagePath, String videoPath) {
+    private boolean isAlreadyProcessed(long tblId) {
         try {
-            CheckAlarmResult result = checkAlarmResultMapper.getResultByKey(alarmId, imagePath, videoPath);
+            CheckAlarmResult result = checkAlarmResultMapper.getResultByTblId(tblId);
             return result != null;
         } catch (Exception e) {
-            log.error("查询抛洒物算法处理状态异常,默认按未处理继续 | alarmId:{} | imagePath:{} | videoPath:{} | 异常详情:", alarmId, imagePath, videoPath, e);
+            log.error("查询抛洒物算法处理状态异常,默认按未处理继续 |tblId:{} | 异常详情:{}", tblId, e);
             return false; // 查库异常时允许继续处理，避免阻塞流程
         }
     }

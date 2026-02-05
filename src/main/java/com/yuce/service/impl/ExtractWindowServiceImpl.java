@@ -37,17 +37,13 @@ public class ExtractWindowServiceImpl extends ServiceImpl<ExtractWindowMapper, E
 
     /**
      * @desc 查询告警记录是否已经提框
-     * @param alarmId
-     * @param imagePath
+     * @param tblId
      * * @param videoPath
      * @return
      */
-    public boolean existsByKey(String alarmId, String imagePath, String videoPath) {
-        //根据告警记录id查询原始告警抽图对应的框坐标
+    public boolean existsByTblId(long tblId) {
         QueryWrapper<ExtractWindowRecord> extractWrapper = new QueryWrapper<>();
-        extractWrapper.eq("alarm_id", alarmId);
-        extractWrapper.eq("image_path", imagePath);
-        extractWrapper.eq("video_path", videoPath);
+        extractWrapper.eq("tbl_id", tblId);
         return this.getOne(extractWrapper) != null;
     }
 

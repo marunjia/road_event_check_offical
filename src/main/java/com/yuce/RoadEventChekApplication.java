@@ -12,3 +12,4 @@ public class RoadEventChekApplication {
         SpringApplication.run(RoadEventChekApplication.class, args);
     }
 }
+

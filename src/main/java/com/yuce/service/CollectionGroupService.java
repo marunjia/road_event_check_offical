@@ -13,5 +13,5 @@ public interface CollectionGroupService extends IService<CollectionGroupRecord> 
      * @param collectionId
      * @return
      */
-    List<Map<String, Object>> getIndexByCollectionId(String collectionId);
+    List<Map<String, Object>> getIndexByCollectionId(Integer collectionId);
 }

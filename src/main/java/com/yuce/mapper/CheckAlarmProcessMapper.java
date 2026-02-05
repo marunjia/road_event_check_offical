@@ -22,6 +22,10 @@ public interface CheckAlarmProcessMapper extends BaseMapper<CheckAlarmProcess> {
                                       @Param("imagePath") String imagePath,
                                       @Param("videoPath") String videoPath);
 
+    //根据告警记录id、图片路径、视频路径的联合主键查询 iou top1
+    @Select("SELECT * FROM algorithm_check_process WHERE tbl_id = #{tblId} ORDER BY iou DESC LIMIT 1")
+    CheckAlarmProcess getIouTop1ByTblId(@Param("tblId") long tblId);
+
     //根据告警记录id、图片路径、视频路径、图片id的联合主键查询 iou top1
     @Select("SELECT * FROM algorithm_check_process WHERE alarm_id = #{alarmId} AND image_path = #{imagePath} AND video_path = #{videoPath} AND image_id = #{imageId} ORDER BY iou DESC LIMIT 1")
     CheckAlarmProcess getIouTop1ByKeyAndPic(@Param("alarmId") String alarmId,
@@ -41,6 +45,10 @@ public interface CheckAlarmProcessMapper extends BaseMapper<CheckAlarmProcess> {
     List<CheckAlarmProcess> getListByKey(@Param("alarmId") String alarmId,
                                          @Param("imagePath") String imagePath,
                                          @Param("videoPath") String videoPath);
+
+    //根据告警记录id、图片路径、视频路径、type的联合主键查询对应记录明细
+    @Select("SELECT * FROM algorithm_check_process WHERE tbl_id = #{tblId}")
+    List<CheckAlarmProcess> getListByTblId(@Param("tblId") long tblId);
 
     //查询某张图片检测结果中除iou top1以外的物体分类数量，并按照优先级进行排序
     @Select("select t.name,count(t.name) as occur_num\n" +

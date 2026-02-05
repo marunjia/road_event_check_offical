@@ -82,21 +82,16 @@ public interface OriginalAlarmMapper extends BaseMapper<OriginalAlarmRecord> {
     @Select({
             "<script>",
             "SELECT t1.*",
-            "FROM (",
-            "    SELECT * FROM kafka_original_alarm_record",
-            "    WHERE tbl_id IN",
-            "    <foreach collection='tblIdList' item='id' open='(' separator=',' close=')'>",
-            "        #{id}",
-            "    </foreach>",
-            ") t1",
-            "LEFT JOIN algorithm_check_result t2",
+            "FROM kafka_original_alarm_record t1",
+            "JOIN algorithm_check_result t2",
             "ON t1.alarm_id = t2.alarm_id",
             "AND t1.image_path = t2.image_path",
             "AND t1.video_path = t2.video_path",
-            "WHERE 1 = 1",
-            "  <if test='checkFlag != null'>",
-            "    AND t2.check_flag = #{checkFlag}",
-            "  </if>",
+            "AND t2.check_flag = #{checkFlag}",
+            "WHERE t1.tbl_id IN",
+            "<foreach collection='tblIdList' item='id' open='(' separator=',' close=')'>",
+            "    #{id}",
+            "</foreach>",
             "</script>"
     })
     List<OriginalAlarmRecord> getListByTblIdList(

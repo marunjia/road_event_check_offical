@@ -17,6 +17,10 @@ public class CheckAlarmResult {
     @TableId(type = IdType.AUTO)
     private Long id;
 
+    /** 关联告警记录id */
+    @TableField("tbl_id")
+    private Long tblId;
+
     @TableField("alarm_id")
     private String alarmId;
 
@@ -34,6 +38,9 @@ public class CheckAlarmResult {
 
     @TableField("check_source")
     private String checkSource; //检测结果来源
+
+    @TableField("check_reason")
+    private String checkReason; //检测原因
 
     @TableField("check_time")
     private LocalDateTime checkTime;

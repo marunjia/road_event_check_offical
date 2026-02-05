@@ -55,7 +55,7 @@ public class GxFeatureDataPush {
             // 主告警集 JSON
             JSONArray jsonArray = new JSONArray();
             JSONObject jsonObject = new JSONObject();
-            jsonObject.put("id", alarmCollection.getCollectionId());
+            jsonObject.put("id", alarmCollection.getId());
             jsonObject.put("eventId", earliestRecord.getEventId());
             jsonObject.put("inferEventTypeName", alarmCollection.getEventType());
             jsonObject.put("suggestion", alarmCollection.getDisposalAdvice());
@@ -103,9 +103,7 @@ public class GxFeatureDataPush {
                 subJsonObject.put("company", relatedRecord.getCompany());
                 subJsonObject.put("modifyTime", relatedRecord.getModifyTimeSys());
 
-                FeatureElementRecord featureElementRecord =
-                        featureElementServiceImpl.getFeatureByKey(relatedRecord.getId(),
-                                relatedRecord.getImagePath(), relatedRecord.getVideoPath());
+                FeatureElementRecord featureElementRecord = featureElementServiceImpl.getFeatureByTblId(relatedRecord.getTblId());
                 if (featureElementRecord != null) {
                     subJsonObject.put("adviceReason", featureElementRecord.getAdviceReason());
                     subJsonObject.put("disposalAdvice", featureElementRecord.getDisposalAdvice());
@@ -118,7 +116,7 @@ public class GxFeatureDataPush {
             // 发送 POST 请求
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
-            log.info("请求结果:{}",jsonArray.toJSONString());
+            //log.info("请求结果:{}",jsonArray.toJSONString());
             HttpEntity<String> entity = new HttpEntity<>(jsonArray.toJSONString(), headers);
             String response = restTemplate.postForObject(API_URL, entity, String.class);
             log.info("推送成功，响应结果: {}", response);

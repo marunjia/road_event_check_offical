@@ -6,57 +6,36 @@ import com.yuce.entity.*;
 import com.yuce.mapper.AlarmCollectionMapper;
 import com.yuce.service.AlarmCollectionService;
 import com.yuce.service.impl.*;
+import com.yuce.util.FlagTagUtil;
+import com.yuce.util.LatLngDistanceUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.stereotype.Service;
-import org.springframework.util.Assert;
+import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
 
-/**
- * 告警集算法服务：负责告警集的创建、更新、类型推定及处置建议生成
- */
-@Service
+@Component
 @Slf4j
 public class AlarmCollectionAlgorithm extends ServiceImpl<AlarmCollectionMapper, AlarmCollection> implements AlarmCollectionService {
 
-    // ------------------------------ 常量定义（统一维护，避免硬编码） ------------------------------
-    /** 告警集状态：开启 */
-    private static final int COLLECTION_STATUS_OPEN = 1;
-    /** 告警集状态：关闭 */
-    private static final int COLLECTION_STATUS_CLOSED = 2;
-    /** 告警集来源类型：正常告警 */
-    private static final int SOURCE_TYPE_NORMAL = 1;
-    /** 告警集来源类型：非法闯入 */
-    private static final int SOURCE_TYPE_ILLEGAL_ENTRY = 2;
-    /** 处置建议：疑似误报 */
-    private static final int ADVICE_SUSPECTED_ERROR = 1;
-    /** 处置建议：尽快确认 */
-    private static final int ADVICE_NEED_CONFIRM = 2;
-    /** 处置建议：无需处理 */
-    private static final int ADVICE_NO_NEED = 3;
-    /** 处置建议：无法判断 */
-    private static final int ADVICE_UNKNOWN = 0;
-
-
     // ------------------------------ 依赖注入 ------------------------------
     @Autowired
-    private AlarmCollectionServiceImpl alarmCollectionService;
+    private AlarmCollectionServiceImpl alarmCollectionServiceImpl;
 
     @Autowired
-    private OriginalAlarmServiceImpl originalAlarmService;
+    private OriginalAlarmServiceImpl originalAlarmServiceImpl;
 
     @Autowired
-    private FeatureElementServiceImpl featureElementService;
+    private FeatureElementServiceImpl featureElementServiceImpl;
 
     @Autowired
-    private CheckAlarmProcessServiceImpl checkAlarmProcessService;
+    private CheckAlarmProcessServiceImpl checkAlarmProcessServiceImpl;
 
     @Autowired
-    private CollectionDurationConfigServiceImpl durationConfigService;
+    private CheckAlarmResultServiceImpl checkAlarmResultServiceImpl;
 
     @Autowired
     private GxFeatureDataPush gxFeatureDataPush;
@@ -65,66 +44,103 @@ public class AlarmCollectionAlgorithm extends ServiceImpl<AlarmCollectionMapper,
     // ------------------------------ 核心业务方法 ------------------------------
     /**
      * 告警集处理主逻辑：
-     * 1. 检查告警是否已归属告警集 → 已归属则更新
-     * 2. 未归属则检查点位是否有活跃告警集 → 有则判断时间间隔，无则创建新集
+     * 1、alarmId是否已存在对应告警集
+     *      已存在：将当前告警记录合并到对应告警集
+     *      不存在：判断告警类型
+     *          非法车辆：直接创建告警集；
+     *          其他告警：继续后续处理逻辑；
+     * 2、alarmId不存在对应告警集且告警类型不是非法车辆
+     *      deviceId点位是否存在告警集
+     *          已存在：判断deviceId对应告警集内最新告警记录与当前告警记录时间差值是否小于10分钟，如果小于则直接合并；
+     *          不存在：查询最近10分钟的告警记录，判断是否有距离小于200米、告警方向相同的告警记录，如果有则直接合并进历史告警记录对应的告警集中；
      */
     public void collectionDeal(OriginalAlarmRecord record) {
-        // 提取核心字段
+
+        // 提取核心字段（增加非空默认值）
         Long tblId = record.getTblId();
         String alarmId = record.getId();
-        String imagePath = record.getImagePath();
-        String videoPath = record.getVideoPath();
-        String roadId = record.getRoadId();
+        String imagePath = record.getImagePath() == null ? "" : record.getImagePath();
+        String videoPath = record.getVideoPath() == null ? "" : record.getVideoPath();
         String deviceId = record.getDeviceId();
         LocalDateTime alarmTime = record.getAlarmTime();
         String eventType = record.getEventType();
-        int milestone = record.getMilestone();
+        String directionDes = record.getDirectionDes();
+        log.info("告警记录进行告警集逻辑处理 | tblId:{} | alarmId:{} | imagePath:{} | videoPath:{} | eventType:{} | alarmTime:{}", tblId, alarmId, imagePath, videoPath, eventType, alarmTime);
 
-        // 核心字段空值校验（提前阻断非法数据）
-        validateCoreFields(tblId, alarmId, imagePath, videoPath, deviceId, alarmTime, eventType);
+        //获取告警记录初检结果
+        int checkFlag = getCheckFlag(tblId);
 
-        // 解析设备名称
-        String deviceName = parseDeviceName(record.getContent());
-        log.info("开始告警集处理 | alarmId:{} | deviceId:{} | eventType:{} | videoPath:{}", alarmId, deviceId, eventType, videoPath);
+        //alarmId已有归属告警集逻辑
+        AlarmCollection existingByAlarmId = alarmCollectionServiceImpl.getCollectionByAlarmId(alarmId);
+        if(existingByAlarmId != null){
+            //更新告警集
+            updateCollection(existingByAlarmId, record, checkFlag);
+            log.info("当前告警记录alarmId已存在,更新告警集 | tblId:{} | alarmId:{} | imagePath:{} | videoPath:{} | collectionId:{}",
+                    tblId, alarmId, imagePath, videoPath, existingByAlarmId.getId());
 
-        // 检查告警是否已归属告警集
-        AlarmCollection existingByAlarmId = alarmCollectionService.getCollectionByAlarmId(alarmId);
-        if (existingByAlarmId != null) {
-            // 已归属：更新告警集（追加当前告警）
-            updateCollectionWithNewAlarm(existingByAlarmId, tblId, alarmId);
-            log.info("告警已归属告警集，更新完成 | alarmId:{} | imagePath:{} | videoPath:{} | collectionId:{}", alarmId, imagePath, videoPath, existingByAlarmId.getId());
+            //更新处置建议
+            appendAdvice(record, alarmCollectionServiceImpl.getCollectionByTblId(tblId).getId());
             pushToGx(record, alarmId);
             return;
         }
+        log.info("当前告警记录alarmId未归属,继续后续处理 | tblId:{} | alarmId:{} | imagePath:{} | videoPath:{}", tblId, alarmId, imagePath, videoPath);
 
-        // 未归属：检查点位是否有最新活跃告警集
-        AlarmCollection latestByDevice = alarmCollectionService.getLatestByDeviceId(deviceId);
-        if (latestByDevice != null) {
-            // 有点位告警集：判断时间间隔是否超过配置
-            handleExistingDeviceCollection(latestByDevice, record, tblId, alarmId, videoPath, alarmTime, eventType);
+
+        /**
+         * alarmId未有归属告警集逻辑
+         */
+        if ("非法车辆".equals(eventType)) {
+            log.info("当前告警记录为非法车辆告警且alarmId无归属，创建新告警集：tblId:{} | alarmId:{} | imagePath:{} | videoPath:{}",
+                    tblId, alarmId, imagePath, videoPath);
+            insertAlarmCollection(record, checkFlag);
         } else {
-            // 无点位告警集：创建新告警集
-            createNewCollection(roadId, deviceId, deviceName, eventType, tblId, alarmId, alarmTime, milestone);
-            log.info("点位无活跃告警集，新集创建完成 | alarmId:{} | deviceId:{}", alarmId, deviceId);
+            // 检查点位是否有最新活跃告警集
+            try {
+                AlarmCollection latestByDevice = alarmCollectionServiceImpl.getLatestByDeviceId(deviceId);
+                if (latestByDevice != null) {
+                    log.info("当前告警记录deviceId:{}存在活跃告警集，进行业务逻辑判定 | tblId:{} | alarmId:{} | imagePath:{} | videoPath:{}",
+                            deviceId, tblId, alarmId, imagePath, videoPath);
+                    handleExistingDeviceCollection(latestByDevice, record, checkFlag);
+                } else {
+                    /**
+                     * 无点位告警集：检测最近10分钟所有告警记录里面是否存在距离小于200米，且方向相同的告警记录
+                     */
+                    log.info("当前告警记录deviceId:{}不存在活跃告警集，创建新告警集 | tblId:{} | alarmId:{} | imagePath:{} | videoPath:{}",
+                            deviceId, tblId, alarmId, imagePath, videoPath);
+                    List<OriginalAlarmRecord> recent10MinAlarmList = originalAlarmServiceImpl.getListRecnet10MinByTime(alarmTime);
+                    int matchConditionNum = 0;
+                    for(OriginalAlarmRecord originalAlarmRecord : recent10MinAlarmList){
+                        double historyLatitude = originalAlarmRecord.getLatitude();
+                        double historyLongitude = originalAlarmRecord.getLongitude();
+                        String historyDistanceDes = originalAlarmRecord.getDirectionDes();
+                        double distance = LatLngDistanceUtil.calculateDistance(historyLatitude, historyLongitude, record.getLatitude(), record.getLongitude(), "m");
+                        if(distance <= 200 && historyDistanceDes.equals(directionDes)){
+                           AlarmCollection historyCollection = alarmCollectionServiceImpl.getCollectionByTblId(originalAlarmRecord.getTblId());
+                           matchConditionNum = matchConditionNum + 1;
+                           updateCollection(historyCollection, record, checkFlag);
+                           break;
+                        }
+                    }
+                    if (matchConditionNum == 0) {
+                        insertAlarmCollection(record, checkFlag);
+                    }
+                }
+            } catch (Exception e) {
+                log.error("查询点位最新告警集失败 | deviceId:{} | 异常原因:{}", deviceId, e.getMessage(), e);
+                // 兜底：创建新集
+                insertAlarmCollection(record, checkFlag);
+            }
         }
+
+        //更新处置建议
+        try {
+            appendAdvice(record, alarmCollectionServiceImpl.getCollectionByTblId(tblId).getId());
+        } catch (Exception e) {
+            log.error("更新处置建议失败 | tblId:{} | 异常原因:{}", tblId, e.getMessage(), e);
+        }
+
         // 推送数据到GX
         pushToGx(record, alarmId);
-    }
-
-
-    // ------------------------------ 告警集操作方法 ------------------------------
-    /**
-     * 校验核心业务字段非空
-     */
-    private void validateCoreFields(Long tblId, String alarmId, String imagePath, String videoPath,
-                                    String deviceId, LocalDateTime alarmTime, String eventType) {
-        Assert.notNull(tblId, "告警记录tblId不能为空");
-        Assert.hasText(alarmId, "告警ID(alarmId)不能为空或空白");
-        Assert.hasText(imagePath, "图片路径(imagePath)不能为空或空白");
-        Assert.hasText(videoPath, "视频路径(videoPath)不能为空或空白");
-        Assert.hasText(deviceId, "设备ID(deviceId)不能为空或空白");
-        Assert.notNull(alarmTime, "告警时间(alarmTime)不能为空");
-        Assert.hasText(eventType, "告警类型(eventType)不能为空或空白");
     }
 
     /**
@@ -140,78 +156,181 @@ public class AlarmCollectionAlgorithm extends ServiceImpl<AlarmCollectionMapper,
     }
 
     /**
-     * 已归属告警集：追加新告警并更新
+     * 更新告警集
      */
-    private void updateCollectionWithNewAlarm(AlarmCollection collection, Long newTblId, String newAlarmId) {
+    private void updateCollection(AlarmCollection collection, OriginalAlarmRecord record, int checkFlag) {
+
+        Long newTblId = record.getTblId();
+        String newAlarmId = record.getId();
+        String eventType = record.getEventType();
+        String imagePath = record.getImagePath();
+        String videoPath = record.getVideoPath();
+
+        // 已归属：更新告警集（追加当前告警）
+        int rightCheckNum = collection.getRightCheckNum() == null ? 0 : collection.getRightCheckNum();
+        if (checkFlag == FlagTagUtil.CHECK_RESULT_RIGHT) {
+            rightCheckNum = rightCheckNum + 1;
+        }
+
         try {
             // 解析已有关联列表（处理空字符串）
             List<String> tblIdList = parseRelatedList(collection.getRelatedTblIdList());
             List<String> alarmIdList = parseRelatedList(collection.getRelatedAlarmIdList());
 
-            // 追加新告警ID（去重）
-            if (!tblIdList.contains(String.valueOf(newTblId))) {
+            // 追加新告警记录主键（去重）
+            if (newTblId != null && !tblIdList.contains(String.valueOf(newTblId))) {
                 tblIdList.add(String.valueOf(newTblId));
             }
-            if (!alarmIdList.contains(newAlarmId)) {
+
+            // 追加新告警记录alarmId（去重）
+            if (StringUtils.hasText(newAlarmId) && !alarmIdList.contains(newAlarmId)) {
                 alarmIdList.add(newAlarmId);
             }
 
-            // 获取更新后的时间范围
-            AlarmTimeRange timeRange = originalAlarmService.getTimeRangeByTblIdList(tblIdList);
-            Assert.notNull(timeRange, "获取告警集时间范围失败，tblIdList:" + tblIdList);
+            // 获取更新后的时间范围（增加非空判断）
+            AlarmTimeRange timeRange = originalAlarmServiceImpl.getTimeRangeByTblIdList(tblIdList);
+            if (timeRange == null) {
+                log.error("获取告警集时间范围失败，使用默认值 | tblId:{}, alarmId:{} | imagePath:{} | videoPath:{} | tblIdList:{}", newTblId, newAlarmId, imagePath, videoPath, tblIdList);
+                collection.setEarliestAlarmTime(null);
+                collection.setLatestAlarmTime(null);
+            }else{
+                collection.setEarliestAlarmTime(timeRange.getMinAlarmTime());
+                collection.setLatestAlarmTime(timeRange.getMaxAlarmTime());
+            }
 
             // 更新告警集字段
+            collection.setRightCheckNum(rightCheckNum);
+            if ("非法车辆".equals(eventType)) {
+                collection.setEventType("摩托车闯禁");
+                collection.setRelatedSourceType(FlagTagUtil.SOURCE_TYPE_ILLEGAL_ENTRY);
+            } else {
+                collection.setEventType(defineCollectionEventType(collection.getId(), tblIdList));
+                collection.setRelatedSourceType(FlagTagUtil.SOURCE_TYPE_NORMAL);
+            }
             collection.setRelatedTblIdList(String.join(",", tblIdList));
             collection.setRelatedAlarmIdList(String.join(",", alarmIdList));
             collection.setDisposalAdvice(calculateCollectionAdvice(collection));
-            collection.setEarliestAlarmTime(timeRange.getMinAlarmTime());
-            collection.setLatestAlarmTime(timeRange.getMaxAlarmTime());
             collection.setRelatedAlarmNum(tblIdList.size());
-            collection.setRelatedSourceType(SOURCE_TYPE_NORMAL);
             collection.setModifyTime(LocalDateTime.now());
-
+            log.info(collection.toString());
             this.updateById(collection);
+            log.info("告警集执行更新：tblId:{} | alarmId:{} | collectionId:{}", newTblId, newAlarmId, collection.getId());
         } catch (Exception e) {
-            log.error("更新告警集失败 | collectionId:{} | newAlarmId:{} | 异常原因:",
-                    collection.getId(), newAlarmId, e);
-            throw new RuntimeException("更新告警集失败", e);
+            log.error("告警集更新异常：tblId:{} | alarmId:{} | collectionId:{} | exception info:{}",
+                    newTblId, newAlarmId, collection != null ? collection.getId() : "null", e.getMessage());
+            throw new RuntimeException("告警集更新失败", e);
         }
     }
 
     /**
      * 处理点位已有告警集：判断时间间隔，决定更新或创建新集
+     * 核心修复：解决IndexOutOfBoundsException异常，增加全链路防御性判空
      */
-    private void handleExistingDeviceCollection(AlarmCollection existingCollection, OriginalAlarmRecord record,
-                                                Long tblId, String alarmId, String videoPath, LocalDateTime alarmTime, String eventType) {
+    private void handleExistingDeviceCollection(AlarmCollection existingCollection, OriginalAlarmRecord record, int checkFlag) {
+        // 外层异常捕获，兜底处理所有未预判的异常
         try {
-            // 获取配置的时间间隔（校验配置）
-            CollectionDurationConfig config = durationConfigService.getConfig();
-            Assert.notNull(config, "未获取到告警集时间间隔配置");
-            long configMinutes = config.getDurationMinutes();
-            Assert.isTrue(configMinutes > 0, "告警集时间间隔配置必须大于0");
+            // 1. 获取告警集属性信息
+            int collectionId = existingCollection.getId();
+            String deviceId = existingCollection.getDeviceId() == null ? "" : existingCollection.getDeviceId();
 
-            // 计算时间差
-            long timeDiffMinutes = Math.abs(Duration.between(existingCollection.getLatestAlarmTime(), alarmTime).toMinutes());
-            log.debug("点位告警集时间差 | collectionId:{} | 配置间隔:{}分钟 | 实际间隔:{}分钟",
-                    existingCollection.getId(), configMinutes, timeDiffMinutes);
+            // 2. 获取当前告警记录字段属性信息（增加非空默认值）
+            long currentTblId = record.getTblId() == null ? -1L : record.getTblId();
+            String currentAlarmId = record.getId() == null ? "" : record.getId();
+            String currentImagePath = record.getImagePath() == null ? "" : record.getImagePath();
+            String currentVideoPath = record.getVideoPath() == null ? "" : record.getVideoPath();
+            String currentEventType = record.getEventType() == null ? "" : record.getEventType();
+            LocalDateTime currentAlarmTime = record.getAlarmTime() == null ? LocalDateTime.now() : record.getAlarmTime();
+            int currentMileStone = record.getMilestone() == 0 ? 0 : record.getMilestone();
 
-            if (timeDiffMinutes > configMinutes) {
-                // 超过间隔：关闭旧集，创建新集
-                closeOldCollection(existingCollection);
-                createNewCollection(record.getRoadId(), record.getDeviceId(),
-                        parseDeviceName(record.getContent()), eventType, tblId, alarmId, alarmTime, record.getMilestone());
-                log.info("告警集超时，创建新集 | oldCollectionId:{} | newAlarmId:{} | 间隔:{}分钟",
-                        existingCollection.getId(), alarmId, timeDiffMinutes);
+            // 4. 获取告警集最新记录字段属性信息
+            List<String> tblIdList = parseRelatedList(existingCollection.getRelatedTblIdList());
+
+            // 获取小于当前告警记录时间的最新一条记录，由于数据乱序问题，时间可能为空
+            List<OriginalAlarmRecord> timeAgoList = originalAlarmServiceImpl.getListByTblIdListAndTimeAgo(tblIdList, currentAlarmTime);
+            OriginalAlarmRecord targetRecord = null;
+
+            /**
+             * 获取告警时间小于当前告警记录时间的告警记录列表
+             */
+            if (timeAgoList != null && !timeAgoList.isEmpty()) {
+                targetRecord = timeAgoList.get(0);
             } else {
-                // 未超间隔：更新旧集
-                updateExistingDeviceCollection(existingCollection, tblId, alarmId, eventType);
-                log.info("告警集未超时，更新完成 | collectionId:{} | alarmId:{} | 间隔:{}分钟",
-                        existingCollection.getId(), alarmId, timeDiffMinutes);
+                log.info("当前告警集没有小于alarmTime的告警记录，向后查找 | collectionId:{} | currentAlarmTime:{}",
+                        collectionId, currentAlarmTime);
+                List<OriginalAlarmRecord> timeAfterList = originalAlarmServiceImpl.getListByTblIdListAndTimeAfter(tblIdList, currentAlarmTime);
+                // 核心修复：校验timeAfterList是否为空
+                if (timeAfterList == null || timeAfterList.isEmpty()) {
+                    log.error("告警集无任何可对比的告警记录 | collectionId:{} | tblIdList:{}", collectionId, tblIdList);
+                    // 兜底方案：直接创建新集，避免越界
+                    insertAlarmCollection(record, checkFlag);
+                    return;
+                }
+                targetRecord = timeAfterList.get(0);
+            }
+
+            // 防御性判空：targetRecord为空时直接创建新集
+            if (targetRecord == null) {
+                log.error("对比的告警记录为null | collectionId:{} | tblIdList:{}", collectionId, tblIdList);
+                insertAlarmCollection(record, checkFlag);
+                return;
+            }
+
+            // 5. 提取对比记录的字段（增加非空校验）
+            long latestTblId = targetRecord.getTblId() == null ? -1 : targetRecord.getTblId();
+            String latestAlarmId = targetRecord.getId() == null ? "" : targetRecord.getId();
+            String latestImagePath = targetRecord.getImagePath() == null ? "" : targetRecord.getImagePath();
+            String latestVideoPath = targetRecord.getVideoPath() == null ? "" : targetRecord.getVideoPath();
+            String latestEventType = targetRecord.getEventType() == null ? "" : targetRecord.getEventType();
+            LocalDateTime latestAlarmTime = targetRecord.getAlarmTime();
+            int latestMileStone = targetRecord.getMilestone() == 0 ? 0 : targetRecord.getMilestone();
+
+            // 6. 防御性处理：latestAlarmTime为空时直接创建新集
+            if (latestAlarmTime == null) {
+                log.error("对比记录的告警时间为空 | collectionId:{} | latestAlarmId:{}", collectionId, latestAlarmId);
+                insertAlarmCollection(record, checkFlag);
+                return;
+            }
+
+            // 7. 获取相邻告警时间差值
+            long timeDiffMinutes = Math.abs(Duration.between(latestAlarmTime, currentAlarmTime).toMinutes());
+
+            // 8. 获取发生点位差值
+            int mileStoneDiff = Math.abs(currentMileStone - latestMileStone);
+
+            log.info("当前告警记录信息：tblId:{} | alarmId:{} | imagePath:{} | videoPath:{} | eventType:{} | alarmTime:{} |mileStone:{}" +
+                            "集内对比记录信息：tblId:{} | alarmId:{} | imagePath:{} | videoPath:{} | eventType:{} | alarmTime:{} |mileStone:{} | " +
+                            "告警集id:{} | deviceId:{} | timeDiffMinutes:{} | mileStoneDiff:{}",
+                    currentTblId, currentAlarmId, currentImagePath, currentVideoPath, currentEventType, currentAlarmTime, currentMileStone,
+                    latestTblId, latestAlarmId, latestImagePath, latestVideoPath, latestEventType, latestAlarmTime, latestMileStone,
+                    collectionId, deviceId,
+                    timeDiffMinutes, mileStoneDiff
+            );
+
+            // 9. 定义核心动作（消除重复代码）
+            // 动作1：关闭旧集+创建新集
+            Runnable createNewCollectionAction = () -> {
+                closeOldCollection(existingCollection);
+                insertAlarmCollection(record, checkFlag);
+                log.info("告警集超时，创建新集 | oldCollectionId:{} | newAlarmId:{} | 间隔:{}分钟",
+                        existingCollection.getId(), currentAlarmId, timeDiffMinutes);
+            };
+            // 动作2：更新旧集
+            Runnable updateCollectionAction = () -> {
+                updateCollection(existingCollection, record, checkFlag);
+                log.info("告警集未超时，更新完成 | collectionId:{} | alarmId:{} | 间隔:{}分钟", existingCollection.getId(), currentAlarmId, timeDiffMinutes);
+            };
+
+            // 10. 简化条件判断（解耦嵌套，提升可读性）
+            if(timeDiffMinutes <= 10 && record.getDirectionDes().equals(targetRecord.getDirectionDes())){
+                updateCollectionAction.run();
+            }else{
+                createNewCollectionAction.run();
             }
         } catch (Exception e) {
-            log.error("处理点位告警集失败 | collectionId:{} | alarmId:{} | 异常原因:",
-                    existingCollection.getId(), alarmId, e);
-            throw new RuntimeException("处理点位告警集失败", e);
+            log.error("处理点位告警集异常 | collectionId:{} | alarmId:{} | 异常原因:{}",
+                    existingCollection.getId(), record.getId(), e.getMessage(), e);
+            // 兜底：创建新集，避免流程中断
+            insertAlarmCollection(record, checkFlag);
         }
     }
 
@@ -219,94 +338,72 @@ public class AlarmCollectionAlgorithm extends ServiceImpl<AlarmCollectionMapper,
      * 关闭旧告警集
      */
     private void closeOldCollection(AlarmCollection collection) {
-        collection.setCollectionStatus(COLLECTION_STATUS_CLOSED);
+        if (collection == null) {
+            log.warn("关闭旧告警集失败：告警集对象为null");
+            return;
+        }
+        collection.setCollectionStatus(FlagTagUtil.COLLECTION_STATUS_CLOSED);
         collection.setModifyTime(LocalDateTime.now());
-        alarmCollectionService.updateById(collection);
+        alarmCollectionServiceImpl.updateById(collection);
         log.debug("旧告警集已关闭 | collectionId:{}", collection.getId());
     }
 
     /**
-     * 创建新告警集
+     * 创建新告警集（底层方法）
      */
-    public void insertAlarmCollection(String roadId, String deviceId, String deviceName, String eventType,
-                                      Long tblId, String alarmId, Integer sourceType, LocalDateTime alarmTime, int milestone) {
-        try {
-            // 校验入参
-            Assert.hasText(roadId, "道路ID(roadId)不能为空");
-            Assert.hasText(deviceId, "设备ID(deviceId)不能为空");
-            Assert.hasText(eventType, "事件类型(eventType)不能为空");
-            Assert.notNull(sourceType, "来源类型(sourceType)不能为空");
+    public void insertAlarmCollection(OriginalAlarmRecord record, int checkFlag) {
 
+        Integer sourceType = getRelatedSourceType(record.getEventType());
+        String roadId = record.getRoadId();
+
+        String deviceId = null;
+        String deviceName = null;
+        if ("非法车辆".equals(record.getEventType())) {
+            deviceId = "无固定点位";
+            deviceName = "无固定点位名称";
+        }else{
+            deviceId = record.getDeviceId();
+            deviceName = parseDeviceName(record.getContent());
+        }
+
+        String eventType = getTypeReflect(record.getEventType());//事件类型转换
+        Long tblId = record.getTblId();
+        String alarmId = record.getId();
+        LocalDateTime alarmTime = record.getAlarmTime();
+        int milestone = record.getEndMilestone();
+
+        try {
             // 构建新告警集
             AlarmCollection newCollection = new AlarmCollection();
-            newCollection.setCollectionId(UUID.randomUUID().toString());
-            newCollection.setRoadId(roadId);
-            newCollection.setDeviceId(deviceId);
+            newCollection.setRoadId(roadId == null ? "" : roadId);
+            newCollection.setDeviceId(deviceId == null ? "" : deviceId);
+
             newCollection.setDeviceName(StringUtils.hasText(deviceName) ? deviceName : "未知设备");
             newCollection.setMilestone(milestone);
-            newCollection.setRelatedTblIdList(String.valueOf(tblId));
-            newCollection.setRelatedAlarmIdList(alarmId);
-            newCollection.setEventType(eventType);
-            newCollection.setDisposalAdvice(ADVICE_NEED_CONFIRM);
-            newCollection.setEarliestAlarmTime(alarmTime);
-            newCollection.setLatestAlarmTime(alarmTime);
+            newCollection.setRelatedTblIdList(tblId == null ? "" : String.valueOf(tblId));
+            newCollection.setRelatedAlarmIdList(alarmId == null ? "" : alarmId);
+            newCollection.setEventType(eventType == null ? "" : eventType);
+            newCollection.setDisposalAdvice(FlagTagUtil.ADVICE_CONFIRM);
+            newCollection.setEarliestAlarmTime(alarmTime == null ? LocalDateTime.now() : alarmTime);
+            newCollection.setLatestAlarmTime(alarmTime == null ? LocalDateTime.now() : alarmTime);
             newCollection.setRelatedAlarmNum(1);
-            newCollection.setCollectionStatus(COLLECTION_STATUS_OPEN);
-            newCollection.setRelatedSourceType(sourceType);
+            newCollection.setCollectionStatus(FlagTagUtil.COLLECTION_STATUS_OPEN);
+            newCollection.setRelatedSourceType(sourceType == null ? FlagTagUtil.SOURCE_TYPE_NORMAL : sourceType);
             newCollection.setCreateTime(LocalDateTime.now());
             newCollection.setModifyTime(LocalDateTime.now());
 
+            if (checkFlag == FlagTagUtil.CHECK_RESULT_RIGHT) {
+                newCollection.setRightCheckNum(1);
+            } else {
+                newCollection.setRightCheckNum(0);
+            }
+
             this.saveOrUpdate(newCollection);
-            log.debug("新告警集创建成功 | collectionId:{} | alarmId:{}",
-                    newCollection.getCollectionId(), alarmId);
+            log.debug("新告警集创建成功 | collectionId:{} | alarmId:{}", newCollection.getId(), alarmId);
         } catch (Exception e) {
             log.error("创建新告警集失败 | alarmId:{} | 异常原因:", alarmId, e);
             throw new RuntimeException("创建新告警集失败", e);
         }
-    }
-
-    /**
-     * 调用insertAlarmCollection的简化方法
-     */
-    private void createNewCollection(String roadId, String deviceId, String deviceName, String eventType,
-                                     Long tblId, String alarmId, LocalDateTime alarmTime, int milestone) {
-        int sourceType = getRelatedSourceType(eventType);
-        insertAlarmCollection(roadId, deviceId, deviceName, getTypeReflect(eventType),
-                tblId, alarmId, sourceType, alarmTime, milestone);
-    }
-
-    /**
-     * 更新点位已有告警集（追加新告警）
-     */
-    private void updateExistingDeviceCollection(AlarmCollection collection, Long newTblId,
-                                                String newAlarmId, String eventType) {
-        List<String> tblIdList = parseRelatedList(collection.getRelatedTblIdList());
-        List<String> alarmIdList = parseRelatedList(collection.getRelatedAlarmIdList());
-
-        // 追加新告警（去重）
-        if (!tblIdList.contains(String.valueOf(newTblId))) {
-            tblIdList.add(String.valueOf(newTblId));
-        }
-        if (!alarmIdList.contains(newAlarmId)) {
-            alarmIdList.add(newAlarmId);
-        }
-
-        // 推定告警集类型
-        String definedEventType = defineCollectionEventType(collection.getCollectionId(), tblIdList);
-        AlarmTimeRange timeRange = originalAlarmService.getTimeRangeByTblIdList(tblIdList);
-        Assert.notNull(timeRange, "获取时间范围失败，tblIdList:" + tblIdList);
-
-        // 更新字段
-        collection.setRelatedTblIdList(String.join(",", tblIdList));
-        collection.setRelatedAlarmIdList(String.join(",", alarmIdList));
-        collection.setEventType(StringUtils.hasText(definedEventType) ? definedEventType : eventType);
-        collection.setDisposalAdvice(calculateCollectionAdvice(collection));
-        collection.setEarliestAlarmTime(timeRange.getMinAlarmTime());
-        collection.setLatestAlarmTime(timeRange.getMaxAlarmTime());
-        collection.setRelatedAlarmNum(tblIdList.size());
-        collection.setModifyTime(LocalDateTime.now());
-
-        this.updateById(collection);
     }
 
     /**
@@ -327,6 +424,10 @@ public class AlarmCollectionAlgorithm extends ServiceImpl<AlarmCollectionMapper,
      */
     private void pushToGx(OriginalAlarmRecord record, String alarmId) {
         try {
+            if (record == null) {
+                log.warn("GX数据推送失败：告警记录为null | alarmId:{}", alarmId);
+                return;
+            }
             gxFeatureDataPush.pushToGx(record);
             log.debug("GX数据推送成功 | alarmId:{}", alarmId);
         } catch (Exception e) {
@@ -340,17 +441,17 @@ public class AlarmCollectionAlgorithm extends ServiceImpl<AlarmCollectionMapper,
     /**
      * 推定告警集事件类型（基于关联正检告警）
      */
-    public String defineCollectionEventType(String collectionId, List<String> tblIdList) {
+    public String defineCollectionEventType(Integer collectionId, List<String> tblIdList) {
         if (tblIdList.isEmpty()) {
             log.error("推定类型失败：关联tblId列表为空 | collectionId:{}", collectionId);
-            return "";
+            return "不在判定范围";
         }
 
         // 获取告警集中所有正检的告警记录
-        List<OriginalAlarmRecord> positiveRecords = originalAlarmService.getListByTblIdList(tblIdList, 1);
+        List<OriginalAlarmRecord> positiveRecords = originalAlarmServiceImpl.getListByTblIdList(tblIdList, 1);
         if (positiveRecords.isEmpty()) {
             log.error("推定类型失败：无正检记录 | collectionId:{} | tblIdList:{}", collectionId, tblIdList);
-            return "";
+            return "不在判定范围";
         }
 
         // 分类存储告警记录
@@ -362,7 +463,7 @@ public class AlarmCollectionAlgorithm extends ServiceImpl<AlarmCollectionMapper,
         List<String> pswNameList = new ArrayList<>();
 
         for (OriginalAlarmRecord record : positiveRecords) {
-            CheckAlarmProcess process = checkAlarmProcessService.getIouTop1ByKey(
+            CheckAlarmProcess process = checkAlarmProcessServiceImpl.getIouTop1ByKey(
                     record.getId(), record.getImagePath(), record.getVideoPath());
 
             if (process == null || process.getName() == null) {
@@ -410,7 +511,7 @@ public class AlarmCollectionAlgorithm extends ServiceImpl<AlarmCollectionMapper,
         finalType = checkVehicleStop(vehicleNameList, positiveRecords.size());
         if (StringUtils.hasText(finalType)) return finalType;
 
-        return "";
+        return "不在判定范围";
     }
 
     /**
@@ -525,44 +626,83 @@ public class AlarmCollectionAlgorithm extends ServiceImpl<AlarmCollectionMapper,
      * 计算告警集处置建议
      */
     public int calculateCollectionAdvice(AlarmCollection collection) {
+        if (collection == null) {
+            log.error("计算处置建议失败：告警集对象为null");
+            return FlagTagUtil.ADVICE_CONFIRM;
+        }
+
         List<String> tblIds = parseRelatedList(collection.getRelatedTblIdList());
-        List<OriginalAlarmRecord> allRecords = originalAlarmService.getListByTblIdList(tblIds);
-        List<OriginalAlarmRecord> confirmedEvents = originalAlarmService.getEventByIdList(tblIds);
-        List<OriginalAlarmRecord> unconfirmedEvents = originalAlarmService.getNoEventByIdList(tblIds);
+        List<OriginalAlarmRecord> allRecords = originalAlarmServiceImpl.getListByTblIdList(tblIds);
+        List<OriginalAlarmRecord> confirmedEvents = originalAlarmServiceImpl.getEventByIdList(tblIds);
+        List<OriginalAlarmRecord> unconfirmedEvents = originalAlarmServiceImpl.getNoEventByIdList(tblIds);
 
         // 统计各类型处置建议
         Map<Integer, Integer> adviceCount = countAdviceFlags(allRecords, confirmedEvents, unconfirmedEvents);
 
         // 根据统计结果返回建议
-        if (confirmedEvents.isEmpty()) {
-            return getAdviceForUnconfirmed(adviceCount, unconfirmedEvents.size());
+        if (confirmedEvents == null || confirmedEvents.isEmpty()) {
+            return getAdviceForUnconfirmed(adviceCount, unconfirmedEvents == null ? 0 : unconfirmedEvents.size());
         } else {
-            return getAdviceForConfirmed(collection, tblIds, adviceCount, unconfirmedEvents.size());
+            return getAdviceForConfirmed(collection, tblIds, adviceCount, unconfirmedEvents == null ? 0 : unconfirmedEvents.size());
         }
     }
 
     /**
-     * 统计处置建议数量
+     * 统计处置建议数量（修复空指针 + 完善判空逻辑）
      */
     private Map<Integer, Integer> countAdviceFlags(List<OriginalAlarmRecord> allRecords,
                                                    List<OriginalAlarmRecord> confirmed,
                                                    List<OriginalAlarmRecord> unconfirmed) {
+        // 初始化计数Map，避免空值
         Map<Integer, Integer> countMap = new HashMap<>();
-        countMap.put(ADVICE_UNKNOWN, 0);
-        countMap.put(ADVICE_SUSPECTED_ERROR, 0);
-        countMap.put(ADVICE_NEED_CONFIRM, 0);
-        countMap.put(ADVICE_NO_NEED, 0);
+        countMap.put(FlagTagUtil.ADVICE_UNDETERMINED, 0);
+        countMap.put(FlagTagUtil.ADVICE_FALSE_ALARM, 0);
+        countMap.put(FlagTagUtil.ADVICE_CONFIRM, 0);
+        countMap.put(FlagTagUtil.ADVICE_NO_NEED, 0);
+
+        // 防御性判空：避免unconfirmed列表为null导致遍历异常
+        if (unconfirmed == null || unconfirmed.isEmpty()) {
+            log.warn("未确认事件列表为空，无需统计处置建议");
+            return countMap;
+        }
 
         // 统计未确认事件的建议
         for (OriginalAlarmRecord record : unconfirmed) {
+            // 1. 判空record本身
+            if (record == null) {
+                log.warn("未确认事件记录为null，跳过统计");
+                countMap.put(FlagTagUtil.ADVICE_UNDETERMINED, countMap.get(FlagTagUtil.ADVICE_UNDETERMINED) + 1);
+                continue;
+            }
+            // 2. 判空tblId（核心查询条件）
+            Long tblId = record.getTblId();
+            if (tblId == null) {
+                log.warn("未确认事件tblId为null | alarmId:{}", record.getId());
+                countMap.put(FlagTagUtil.ADVICE_UNDETERMINED, countMap.get(FlagTagUtil.ADVICE_UNDETERMINED) + 1);
+                continue;
+            }
+
             try {
-                FeatureElementRecord feature = featureElementService.getFeatureByKey(
-                        record.getId(), record.getImagePath(), record.getVideoPath());
+                // 3. 查询特征要素记录并判空
+                FeatureElementRecord feature = featureElementServiceImpl.getFeatureByTblId(tblId);
+                if (feature == null) {
+                    log.warn("未查询到特征要素记录 | tblId:{} | alarmId:{}", tblId, record.getId());
+                    countMap.put(FlagTagUtil.ADVICE_UNDETERMINED, countMap.get(FlagTagUtil.ADVICE_UNDETERMINED) + 1);
+                    continue;
+                }
+                // 4. 安全获取处置建议
                 int advice = feature.getDisposalAdvice();
-                countMap.put(advice, countMap.get(advice) + 1);
+                // 5. 校验建议值是否在合法范围内
+                if (!countMap.containsKey(advice)) {
+                    log.warn("处置建议值非法 | advice:{} | tblId:{} | alarmId:{}", advice, tblId, record.getId());
+                    countMap.put(FlagTagUtil.ADVICE_UNDETERMINED, countMap.get(FlagTagUtil.ADVICE_UNDETERMINED) + 1);
+                } else {
+                    countMap.put(advice, countMap.get(advice) + 1);
+                }
             } catch (Exception e) {
-                log.error("统计处置建议失败 | alarmId:{} | 异常原因:", record.getId(), e);
-                countMap.put(ADVICE_UNKNOWN, countMap.get(ADVICE_UNKNOWN) + 1); // 异常默认无法判断
+                log.error("统计处置建议失败 | alarmId:{} | tblId:{} | 异常原因:{}",
+                        record.getId(), tblId, e.getMessage(), e);
+                countMap.put(FlagTagUtil.ADVICE_UNDETERMINED, countMap.get(FlagTagUtil.ADVICE_UNDETERMINED) + 1);
             }
         }
         return countMap;
@@ -572,21 +712,29 @@ public class AlarmCollectionAlgorithm extends ServiceImpl<AlarmCollectionMapper,
      * 未确认事件的处置建议
      */
     private int getAdviceForUnconfirmed(Map<Integer, Integer> adviceCount, int totalUnconfirmed) {
-        if (adviceCount.get(ADVICE_SUSPECTED_ERROR) == totalUnconfirmed) {
-            return ADVICE_SUSPECTED_ERROR;
-        } else if (adviceCount.get(ADVICE_UNKNOWN) == totalUnconfirmed) {
-            return ADVICE_NEED_CONFIRM;
-        } else if (adviceCount.get(ADVICE_NO_NEED) == totalUnconfirmed) {
-            return ADVICE_NO_NEED;
-        } else if (adviceCount.get(ADVICE_NEED_CONFIRM) == totalUnconfirmed) {
-            return ADVICE_NEED_CONFIRM;
-        } else if (adviceCount.get(ADVICE_UNKNOWN) == 1 || adviceCount.get(ADVICE_NEED_CONFIRM) == 1) {
-            return ADVICE_NEED_CONFIRM;
-        } else if (adviceCount.get(ADVICE_SUSPECTED_ERROR) == 1
-                && adviceCount.get(ADVICE_NO_NEED) == totalUnconfirmed - 1) {
-            return ADVICE_NO_NEED;
+        if (adviceCount == null) {
+            log.warn("处置建议统计Map为null，返回默认值ADVICE_CONFIRM");
+            return FlagTagUtil.ADVICE_CONFIRM;
         }
-        return ADVICE_NEED_CONFIRM;
+
+        if (adviceCount.get(FlagTagUtil.ADVICE_FALSE_ALARM) == totalUnconfirmed) {
+            return FlagTagUtil.ADVICE_FALSE_ALARM;
+
+        } else if (adviceCount.get(FlagTagUtil.ADVICE_UNDETERMINED) == totalUnconfirmed) {
+            return FlagTagUtil.ADVICE_CONFIRM;
+
+        } else if (adviceCount.get(FlagTagUtil.ADVICE_NO_NEED) == totalUnconfirmed) {
+            return FlagTagUtil.ADVICE_NO_NEED;
+
+        } else if (adviceCount.get(FlagTagUtil.ADVICE_CONFIRM) == totalUnconfirmed) {
+            return FlagTagUtil.ADVICE_CONFIRM;
+        } else if (adviceCount.get(FlagTagUtil.ADVICE_UNDETERMINED) == 1 || adviceCount.get(FlagTagUtil.ADVICE_CONFIRM) == 1) {
+            return FlagTagUtil.ADVICE_CONFIRM;
+        } else if (adviceCount.get(FlagTagUtil.ADVICE_FALSE_ALARM) == 1
+                && adviceCount.get(FlagTagUtil.ADVICE_NO_NEED) == totalUnconfirmed - 1) {
+            return FlagTagUtil.ADVICE_NO_NEED;
+        }
+        return FlagTagUtil.ADVICE_CONFIRM;
     }
 
     /**
@@ -594,33 +742,42 @@ public class AlarmCollectionAlgorithm extends ServiceImpl<AlarmCollectionMapper,
      */
     private int getAdviceForConfirmed(AlarmCollection collection, List<String> tblIds,
                                       Map<Integer, Integer> adviceCount, int totalUnconfirmed) {
-        OriginalAlarmRecord latestConfirmed = originalAlarmService.getLatestConfirm(tblIds);
+        if (collection == null || tblIds == null || tblIds.isEmpty()) {
+            log.warn("已确认事件处置建议计算参数异常，返回默认值ADVICE_CONFIRM");
+            return FlagTagUtil.ADVICE_CONFIRM;
+        }
+
+        OriginalAlarmRecord latestConfirmed = originalAlarmServiceImpl.getLatestConfirm(tblIds);
         if (latestConfirmed == null) {
             log.warn("已确认事件为空，但confirmedEvents非空 | collectionId:{}", collection.getId());
-            return ADVICE_NEED_CONFIRM;
+            return FlagTagUtil.ADVICE_CONFIRM;
         }
 
         // 最新记录为已确认事件 → 无需处理
-        if (collection.getLatestAlarmTime().equals(latestConfirmed.getAlarmTime())) {
-            return ADVICE_NO_NEED;
+        if (collection.getLatestAlarmTime() != null && collection.getLatestAlarmTime().equals(latestConfirmed.getAlarmTime())) {
+            return FlagTagUtil.ADVICE_NO_NEED;
         }
 
         // 处理最新确认事件之后的未确认记录
-        if (adviceCount.get(ADVICE_SUSPECTED_ERROR) == totalUnconfirmed) {
-            return ADVICE_NO_NEED;
-        } else if (adviceCount.get(ADVICE_UNKNOWN) == totalUnconfirmed) {
-            return ADVICE_NEED_CONFIRM;
-        } else if (adviceCount.get(ADVICE_NO_NEED) == totalUnconfirmed) {
-            return ADVICE_NO_NEED;
-        } else if (adviceCount.get(ADVICE_NEED_CONFIRM) == totalUnconfirmed) {
-            return ADVICE_NEED_CONFIRM;
-        } else if (adviceCount.get(ADVICE_UNKNOWN) == 1 || adviceCount.get(ADVICE_NEED_CONFIRM) == 1) {
-            return ADVICE_NEED_CONFIRM;
-        } else if (adviceCount.get(ADVICE_SUSPECTED_ERROR) == 1
-                && adviceCount.get(ADVICE_NO_NEED) == totalUnconfirmed - 1) {
-            return ADVICE_NO_NEED;
+        if (adviceCount == null) {
+            return FlagTagUtil.ADVICE_CONFIRM;
         }
-        return ADVICE_NEED_CONFIRM;
+
+        if (adviceCount.get(FlagTagUtil.ADVICE_FALSE_ALARM) == totalUnconfirmed) {
+            return FlagTagUtil.ADVICE_NO_NEED;
+        } else if (adviceCount.get(FlagTagUtil.ADVICE_UNDETERMINED) == totalUnconfirmed) {
+            return FlagTagUtil.ADVICE_CONFIRM;
+        } else if (adviceCount.get(FlagTagUtil.ADVICE_NO_NEED) == totalUnconfirmed) {
+            return FlagTagUtil.ADVICE_NO_NEED;
+        } else if (adviceCount.get(FlagTagUtil.ADVICE_CONFIRM) == totalUnconfirmed) {
+            return FlagTagUtil.ADVICE_CONFIRM;
+        } else if (adviceCount.get(FlagTagUtil.ADVICE_UNDETERMINED) == 1 || adviceCount.get(FlagTagUtil.ADVICE_CONFIRM) == 1) {
+            return FlagTagUtil.ADVICE_CONFIRM;
+        } else if (adviceCount.get(FlagTagUtil.ADVICE_FALSE_ALARM) == 1
+                && adviceCount.get(FlagTagUtil.ADVICE_NO_NEED) == totalUnconfirmed - 1) {
+            return FlagTagUtil.ADVICE_NO_NEED;
+        }
+        return FlagTagUtil.ADVICE_CONFIRM;
     }
 
     /**
@@ -629,28 +786,92 @@ public class AlarmCollectionAlgorithm extends ServiceImpl<AlarmCollectionMapper,
     public String getTypeReflect(String eventType) {
         if (eventType == null || eventType.isEmpty()) return "数据异常";
         switch (eventType) {
-            case "抛洒物": return "路面异常";
-            case "停驶": return "车辆停驶";
-            case "行人": return "行人闯入";
-            default: return "不在判定范围";
+            case "抛洒物":
+                return "路面异常";
+            case "停驶":
+                return "车辆停驶";
+            case "行人":
+                return "行人闯入";
+            case "非法车辆":
+                return "摩托车闯禁";
+            default:
+                return "不在判定范围";
         }
     }
 
     /**
      * 获取告警集来源类型
      */
-    public Integer getRelatedSourceType(String eventType){
-        return "非法闯入".equals(eventType) ? SOURCE_TYPE_ILLEGAL_ENTRY : SOURCE_TYPE_NORMAL;
+    public Integer getRelatedSourceType(String eventType) {
+        return "非法车辆".equals(eventType) ? FlagTagUtil.SOURCE_TYPE_ILLEGAL_ENTRY : FlagTagUtil.SOURCE_TYPE_NORMAL;
     }
 
     /**
-     * 获取最小时间（预留方法，未使用）
+     * 追加补充特征要素处置建议信息
      */
-    private LocalDateTime getMinTime(List<OriginalAlarmRecord> list, String type) {
-        return list.stream()
-                .filter(r -> type.equals(r.getEventType()) && r.getAlarmTime() != null)
-                .map(OriginalAlarmRecord::getAlarmTime)
-                .min(Comparator.naturalOrder())
-                .orElse(null);
+    public void appendAdvice(OriginalAlarmRecord record, int collectionId) {
+        if (record == null) {
+            log.error("追加处置建议失败：告警记录为null");
+            return;
+        }
+
+        Long tblId = record.getTblId();
+        if (tblId == null) {
+            log.error("追加处置建议失败：tblId为null | alarmId:{}", record.getId());
+            return;
+        }
+
+        FeatureElementRecord featureElementRecord = featureElementServiceImpl.getFeatureByTblId(tblId);
+        if (featureElementRecord == null) {
+            log.error("追加处置建议失败：特征要素记录为null | tblId:{}", tblId);
+            return;
+        }
+
+        if (featureElementRecord.getDisposalAdvice() == FlagTagUtil.ADVICE_TMP_WAIT) {
+            int disposalAdvice = FlagTagUtil.ADVICE_UNDETERMINED;
+            String adviceReason = "";
+
+            AlarmCollection alarmCollection = alarmCollectionServiceImpl.getCollectionByTblId(tblId);
+            log.info("正检告警集判断:{}", alarmCollection == null ? "null" : alarmCollection.toString());
+
+            int rightCheckNum = 0; // 默认值
+            if (alarmCollection != null) {
+                Integer rcn = alarmCollection.getRightCheckNum();
+                rightCheckNum = rcn == null ? 0 : rcn;
+                log.info("告警集初检为正检告警记录条数: {}条, 当前查询告警记录 {}", rightCheckNum, tblId);
+            }
+            if (rightCheckNum == 1) {
+                disposalAdvice = FlagTagUtil.ADVICE_CONFIRM;
+                adviceReason = "需人工确认"; // 补充默认原因，避免空值
+            } else {
+                disposalAdvice = FlagTagUtil.ADVICE_REPEAT;
+                adviceReason = "重复告警";
+            }
+
+            featureElementRecord.setMatchCollectionId(collectionId);
+            featureElementRecord.setDisposalAdvice(disposalAdvice);
+            featureElementRecord.setAdviceReason(adviceReason);
+            featureElementServiceImpl.updateById(featureElementRecord);
+            log.info("更新特征要素处置建议信息：tblId:{} | alarmId:{} | imagePath:{} | videoPath:{} | advice:{} | reason:{}",
+                    tblId, record.getId(), record.getImagePath(), record.getVideoPath(), disposalAdvice, adviceReason);
+        } else {
+            featureElementRecord.setMatchCollectionId(collectionId);
+            featureElementServiceImpl.updateById(featureElementRecord);
+        }
     }
+
+    public int getCheckFlag(long tblId){
+        //获取检测结果标签（增加非空处理）
+        int checkFlag = FlagTagUtil.CHECK_RESULT_UNKNOWN;
+        try {
+            CheckAlarmResult checkResult = checkAlarmResultServiceImpl.getResultByTblId(tblId);
+            if (checkResult != null) {
+                checkFlag = checkResult.getCheckFlag();
+            }
+        } catch (Exception e) {
+            log.error("获取检测结果标签失败 | tblId:{} | 异常原因:{}", tblId, e.getMessage(), e);
+        }
+        return checkFlag;
+    }
+
 }
